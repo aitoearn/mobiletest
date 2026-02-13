@@ -16,7 +16,7 @@ const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: '仪表盘' },
   { key: '/cases', icon: <FileTextOutlined />, label: '用例管理' },
   { key: '/executions', icon: <PlayCircleOutlined />, label: '执行中心' },
-  { key: '/devices', icon: <MobileOutlined />, label: '设备管理' },
+  { key: '/devices', icon: <MobileOutlined />, label: '真机调试' },
   { key: '/reports', icon: <BarChartOutlined />, label: '测试报告' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ]

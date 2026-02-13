@@ -79,6 +79,39 @@ class DeviceControlService:
             logger.error(f"Failed to tap: {e}")
             return False
     
+    async def touch_down(self, device_id: str, x: int, y: int) -> bool:
+        """Send touch down event at specified coordinates."""
+        try:
+            await self._run_adb_command(
+                device_id, "shell", "input", "motionevent", "DOWN", str(x), str(y)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send touch down: {e}")
+            return False
+    
+    async def touch_move(self, device_id: str, x: int, y: int) -> bool:
+        """Send touch move event at specified coordinates."""
+        try:
+            await self._run_adb_command(
+                device_id, "shell", "input", "motionevent", "MOVE", str(x), str(y)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send touch move: {e}")
+            return False
+    
+    async def touch_up(self, device_id: str, x: int, y: int) -> bool:
+        """Send touch up event at specified coordinates."""
+        try:
+            await self._run_adb_command(
+                device_id, "shell", "input", "motionevent", "UP", str(x), str(y)
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send touch up: {e}")
+            return False
+    
     async def swipe(self, device_id: str, start_x: int, start_y: int, end_x: int, end_y: int, duration: int = 300) -> bool:
         try:
             await self._run_adb_command(

@@ -6,9 +6,11 @@ import {
   HistoryOutlined,
   MobileOutlined,
 } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import FeatureCard from '@/components/ui/FeatureCard'
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const features = [
     {
       icon: <MobileOutlined />,
@@ -63,6 +65,7 @@ export default function Dashboard() {
             size="large"
             icon={<PlayCircleOutlined />}
             className="bg-accent-primary hover:bg-accent-primary/90 text-white font-medium"
+            onClick={() => navigate('/devices')}
           >
             开始测试
           </Button>

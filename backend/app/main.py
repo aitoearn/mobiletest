@@ -3,8 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from starlette.responses import Response
 
+from socketio import ASGIApp
+
 from app.core.config import settings
 from app.api.v1 import api_router
+from app.services.socketio_server import sio
 
 REQUEST_COUNT = Counter(
     "mobiletest_requests_total",
@@ -18,7 +21,7 @@ REQUEST_LATENCY = Histogram(
     ["method", "endpoint"]
 )
 
-app = FastAPI(
+fastapi_app = FastAPI(
     title=settings.app_name,
     description="Mobile AI Automation Testing Platform with LangGraph Orchestration",
     version="0.2.0",
@@ -26,7 +29,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-app.add_middleware(
+fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allow_origins,
     allow_credentials=settings.cors_allow_credentials,
@@ -34,10 +37,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix="/api")
+fastapi_app.include_router(api_router, prefix="/api")
+
+# Socket.IO 包装 FastAPI，作为 uvicorn 的 ASGI 入口
+app = ASGIApp(
+    other_asgi_app=fastapi_app,
+    socketio_server=sio,
+    socketio_path="/socket.io"
+)
 
 
-@app.get("/health")
+@fastapi_app.get("/health")
 async def health_check():
     return {
         "status": "ok",
@@ -46,7 +56,7 @@ async def health_check():
     }
 
 
-@app.get("/metrics")
+@fastapi_app.get("/metrics")
 async def metrics():
     return Response(
         content=generate_latest(),
@@ -54,7 +64,7 @@ async def metrics():
     )
 
 
-@app.on_event("startup")
+@fastapi_app.on_event("startup")
 async def startup_event():
     import logging
     logging.info(f"Starting {settings.app_name}")

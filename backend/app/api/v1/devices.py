@@ -159,3 +159,54 @@ async def get_screenshot(device_id: str):
         raise HTTPException(status_code=400, detail="截图失败")
     
     return {"status": "success", "screenshot": screenshot_base64}
+
+
+class TouchDownRequest(BaseModel):
+    device_id: str
+    x: int
+    y: int
+
+
+class TouchMoveRequest(BaseModel):
+    device_id: str
+    x: int
+    y: int
+
+
+class TouchUpRequest(BaseModel):
+    device_id: str
+    x: int
+    y: int
+
+
+@router.post("/touch_down")
+async def touch_down(request: TouchDownRequest):
+    from app.services.device import device_control_service
+    
+    success = await device_control_service.touch_down(request.device_id, request.x, request.y)
+    if not success:
+        raise HTTPException(status_code=400, detail="触摸按下失败")
+    
+    return {"status": "success", "action": "touch_down", "x": request.x, "y": request.y}
+
+
+@router.post("/touch_move")
+async def touch_move(request: TouchMoveRequest):
+    from app.services.device import device_control_service
+    
+    success = await device_control_service.touch_move(request.device_id, request.x, request.y)
+    if not success:
+        raise HTTPException(status_code=400, detail="触摸移动失败")
+    
+    return {"status": "success", "action": "touch_move", "x": request.x, "y": request.y}
+
+
+@router.post("/touch_up")
+async def touch_up(request: TouchUpRequest):
+    from app.services.device import device_control_service
+    
+    success = await device_control_service.touch_up(request.device_id, request.x, request.y)
+    if not success:
+        raise HTTPException(status_code=400, detail="触摸抬起失败")
+    
+    return {"status": "success", "action": "touch_up", "x": request.x, "y": request.y}

@@ -7,6 +7,7 @@ import Executions from '@/pages/Executions'
 import Devices from '@/pages/Devices'
 import Reports from '@/pages/Reports'
 import Settings from '@/pages/Settings'
+import Test from '@/pages/Test'
 
 function App() {
   return (
@@ -20,16 +21,24 @@ function App() {
       }}
     >
       <BrowserRouter>
-        <MainLayout>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/cases" element={<Cases />} />
-            <Route path="/executions" element={<Executions />} />
-            <Route path="/devices" element={<Devices />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </MainLayout>
+        <Routes>
+          {/* 测试页面 - 全屏布局 */}
+          <Route path="/test/:deviceId" element={<Test />} />
+          
+          {/* 主应用页面 - 带侧边栏 */}
+          <Route path="/*" element={
+            <MainLayout>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/cases" element={<Cases />} />
+                <Route path="/executions" element={<Executions />} />
+                <Route path="/devices" element={<Devices />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/settings" element={<Settings />} />
+              </Routes>
+            </MainLayout>
+          } />
+        </Routes>
       </BrowserRouter>
     </ConfigProvider>
   )
