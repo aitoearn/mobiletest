@@ -20,6 +20,13 @@ class SynthesizeMode(str, Enum):
     LLM = "llm"
 
 
+class LLMProvider(str, Enum):
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    QWEN = "qwen"
+    LOCAL = "local"
+
+
 class Settings:
     def __init__(self):
         self.app_name = "MobileTest AI"
@@ -30,6 +37,13 @@ class Settings:
             "sqlite+aiosqlite:///./mobiletest.db"
         )
         self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        
+        self.llm_provider = LLMProvider(
+            os.getenv("LLM_PROVIDER", "openai").lower()
+        )
+        self.llm_model = os.getenv("LLM_MODEL", "gpt-4o")
+        self.llm_api_key = os.getenv("LLM_API_KEY", "")
+        self.llm_base_url = os.getenv("LLM_BASE_URL", "")
         
         self.langgraph_planner_mode = PlannerMode(
             os.getenv("LANGGRAPH_PLANNER_MODE", "stub")

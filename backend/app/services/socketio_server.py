@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins="*",
-    logger=True,
-    engineio_logger=True,
+    logger=False,
+    engineio_logger=False,
 )
 
 _socket_streamers: Dict[str, ScrcpyStreamer] = {}

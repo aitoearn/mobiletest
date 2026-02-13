@@ -225,3 +225,83 @@ def get_llm(provider: LLMProvider, model: Optional[str] = None, **kwargs) -> Bas
         return QwenLLM(model=model or "qwen-max", **kwargs)
     else:
         raise ValueError(f"Unsupported provider: {provider}")
+
+
+import json
+import re
+from app.core.config import settings
+
+
+class LLMClient:
+    def __init__(self, provider: Optional[LLMProvider] = None, model: Optional[str] = None):
+        if provider is None:
+            provider_str = os.getenv("LLM_PROVIDER", "openai").lower()
+            provider = LLMProvider(provider_str)
+        
+        provider = provider or settings.llm_provider
+        model = model or settings.llm_model
+        
+        self.llm = get_llm(
+            provider,
+            model,
+            api_key=settings.llm_api_key or None,
+            base_url=settings.llm_base_url or None
+        )
+        self.tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_devices",
+                    "description": "获取所有连接的移动设备列表",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "device_control",
+                    "description": "控制移动设备执行操作",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "device_id": {"type": "string", "description": "设备ID"},
+                            "action": {"type": "string", "description": "操作类型: click/swipe/input/screenshot/launch_app/get_screen_info"},
+                            "params": {"type": "object", "description": "操作参数"}
+                        },
+                        "required": ["action"]
+                    }
+                }
+            }
+        ]
+    
+    async def chat_stream(self, messages: list[dict]):
+        msg_objects = [Message(role=m["role"], content=m["content"]) for m in messages]
+        
+        async for content in self.llm.stream_chat(msg_objects, tools=self.tools):
+            yield content
+    
+    def extract_tools(self, response: str) -> tuple[str, list[dict]]:
+        content = ""
+        tools = []
+        
+        tool_pattern = r'\{[\s\S]*?"function"[\s\S]*?\}'
+        json_blocks = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response)
+        
+        for block in json_blocks:
+            try:
+                data = json.loads(block)
+                if "function" in data or data.get("type") == "function":
+                    tools.append(data.get("function", data))
+                    response = response.replace(block, "")
+                elif "name" in data and "arguments" in data:
+                    tools.append({"name": data["name"], "arguments": data["arguments"]})
+                    response = response.replace(block, "")
+            except:
+                pass
+        
+        content = response.strip()
+        return content, tools
