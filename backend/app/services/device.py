@@ -1,10 +1,13 @@
 import asyncio
 import subprocess
+import os
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 import logging
 
 logger = logging.getLogger(__name__)
+
+ADB_KEYBOARD_PACKAGE = "com.android.adbkeyboard"
 
 
 @dataclass
@@ -173,11 +176,55 @@ class DeviceControlService:
     
     async def input_text(self, device_id: str, text: str) -> bool:
         try:
-            text = text.replace(" ", "%s")
-            await self._run_adb_command(device_id, "shell", "input", "text", text)
+            import base64
+            
+            await self._ensure_adb_keyboard(device_id)
+            
+            encoded_text = base64.b64encode(text.encode("utf-8")).decode("utf-8")
+            
+            await self._run_adb_command(
+                device_id, "shell", "am", "broadcast", 
+                "-a", "ADB_INPUT_B64", "--es", "msg", encoded_text
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to input text: {e}")
+            return False
+    
+    async def _ensure_adb_keyboard(self, device_id: str) -> bool:
+        try:
+            result = await self._run_adb_command(
+                device_id, "shell", "pm", "list", "packages", ADB_KEYBOARD_PACKAGE
+            )
+            
+            if ADB_KEYBOARD_PACKAGE not in result:
+                apk_path = os.path.join(
+                    os.path.dirname(__file__), 
+                    "../../resources/apks/ADBKeyboard.apk"
+                )
+                abs_apk_path = os.path.abspath(apk_path)
+                
+                if not os.path.exists(abs_apk_path):
+                    logger.error(f"ADB Keyboard APK not found at {abs_apk_path}")
+                    return False
+                
+                await self._run_adb_command(device_id, "install", "-r", abs_apk_path)
+                logger.info("ADB Keyboard installed successfully")
+            
+            result = await self._run_adb_command(
+                device_id, "shell", "settings", "get", "secure", "default_input_method"
+            )
+            current_ime = result.strip() if result else ""
+            
+            if "com.android.adbkeyboard/.AdbIME" not in current_ime:
+                await self._run_adb_command(
+                    device_id, "shell", "ime", "set", "com.android.adbkeyboard/.AdbIME"
+                )
+                logger.info("Switched to ADB Keyboard for text input")
+            
+            return True
+        except Exception as e:
+            logger.warning(f"Could not set ADB keyboard: {e}")
             return False
     
     async def press_key(self, device_id: str, key: str) -> bool:
@@ -200,6 +247,15 @@ class DeviceControlService:
         except Exception as e:
             logger.error(f"Failed to press key: {e}")
             return False
+    
+    async def press_enter(self, device_id: str) -> bool:
+        return await self.press_key(device_id, "enter")
+    
+    async def press_back(self, device_id: str) -> bool:
+        return await self.press_key(device_id, "back")
+    
+    async def press_home(self, device_id: str) -> bool:
+        return await self.press_key(device_id, "home")
     
     async def wake_screen(self, device_id: str) -> bool:
         try:
@@ -258,6 +314,39 @@ class DeviceControlService:
             return None
         except Exception:
             return None
+    
+    async def screenshot(self, device_id: str) -> Optional[bytes]:
+        """Take a screenshot and return as PNG bytes."""
+        import tempfile
+        import os
+        
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp_path = tmp.name
+            
+            remote_path = "/sdcard/screenshot.png"
+            await self._run_adb_command(device_id, "shell", "screencap", "-p", remote_path)
+            await self._run_adb_command(device_id, "pull", remote_path, tmp_path)
+            await self._run_adb_command(device_id, "shell", "rm", remote_path)
+            
+            with open(tmp_path, "rb") as f:
+                data = f.read()
+            
+            os.unlink(tmp_path)
+            return data
+            
+        except Exception as e:
+            logger.error(f"Failed to take screenshot: {e}")
+            return None
+    
+    async def screenshot_base64(self, device_id: str) -> Optional[str]:
+        """Take a screenshot and return as base64 string."""
+        import base64
+        
+        data = await self.screenshot(device_id)
+        if data:
+            return base64.b64encode(data).decode("utf-8")
+        return None
     
     async def _run_adb_command(self, device_id: str, *args) -> str:
         cmd = ["adb", "-s", device_id] + list(args)

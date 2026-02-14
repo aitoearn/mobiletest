@@ -473,14 +473,56 @@ class LLMClient:
         
         do_pattern = r'do\s*\(\s*action\s*=\s*["\']?(\w+)["\']?'
         app_pattern = r'app\s*=\s*["\']([^"\']+)["\']'
+        target_pattern = r'target\s*=\s*["\']([^"\']+)["\']'
+        text_pattern = r'text\s*=\s*["\']([^"\']+)["\']'
+        direction_pattern = r'direction\s*=\s*["\']([^"\']+)["\']'
+        key_pattern = r'key\s*=\s*["\']([^"\']+)["\']'
+        x_pattern = r'x\s*=\s*(\d+)'
+        y_pattern = r'y\s*=\s*(\d+)'
+        element_pattern = r'element\s*=\s*\[(\d+)\s*,\s*(\d+)\]'
+        coordinate_pattern = r'coordinate\s*=\s*\[(\d+)\s*,\s*(\d+)\]'
+        element_str_pattern = r'element\s*=\s*["\']([^"\']+)["\']'
         
         do_matches = re.findall(do_pattern, response)
         app_matches = re.findall(app_pattern, response)
+        target_matches = re.findall(target_pattern, response)
+        text_matches = re.findall(text_pattern, response)
+        direction_matches = re.findall(direction_pattern, response)
+        key_matches = re.findall(key_pattern, response)
+        x_matches = re.findall(x_pattern, response)
+        y_matches = re.findall(y_pattern, response)
+        element_matches = re.findall(element_pattern, response)
+        coordinate_matches = re.findall(coordinate_pattern, response)
+        element_str_matches = re.findall(element_str_pattern, response)
         
-        print(f"[DEBUG] do_matches: {do_matches}, app_matches: {app_matches}")
+        print(f"[DEBUG] do_matches: {do_matches}")
+        print(f"[DEBUG] app_matches: {app_matches}")
+        print(f"[DEBUG] text_matches: {text_matches}")
+        print(f"[DEBUG] direction_matches: {direction_matches}")
+        print(f"[DEBUG] key_matches: {key_matches}")
+        print(f"[DEBUG] x_matches: {x_matches}, y_matches: {y_matches}")
+        print(f"[DEBUG] element_matches: {element_matches}")
+        print(f"[DEBUG] coordinate_matches: {coordinate_matches}")
+        print(f"[DEBUG] element_str_matches: {element_str_matches}")
         
         for i, action in enumerate(do_matches):
             app = app_matches[i] if i < len(app_matches) else ""
+            target = target_matches[i] if i < len(target_matches) else ""
+            text = text_matches[i] if i < len(text_matches) else ""
+            direction = direction_matches[i] if i < len(direction_matches) else ""
+            key = key_matches[i] if i < len(key_matches) else ""
+            element_str = element_str_matches[i] if i < len(element_str_matches) else ""
+            x = int(x_matches[i]) if i < len(x_matches) else 0
+            y = int(y_matches[i]) if i < len(y_matches) else 0
+            
+            if not x or not y:
+                if i < len(element_matches):
+                    x = int(element_matches[i][0])
+                    y = int(element_matches[i][1])
+                elif i < len(coordinate_matches):
+                    x = int(coordinate_matches[i][0])
+                    y = int(coordinate_matches[i][1])
+            
             if action.lower() == "launch":
                 tools.append({
                     "name": "device_control",
@@ -489,15 +531,102 @@ class LLMClient:
                         "params": {"package": self._get_package_name(app.strip())}
                     }
                 })
+            elif action.lower() == "tap":
+                if element_str:
+                    tools.append({
+                        "name": "device_control",
+                        "arguments": {
+                            "action": "tap_element",
+                            "params": {"element": element_str}
+                        }
+                    })
+                elif x and y:
+                    tools.append({
+                        "name": "device_control",
+                        "arguments": {
+                            "action": "tap_element",
+                            "params": {"element": f"屏幕坐标({x},{y})附近的可点击元素"}
+                        }
+                    })
+                else:
+                    tools.append({
+                        "name": "device_control",
+                        "arguments": {
+                            "action": "tap_element",
+                            "params": {"element": "屏幕中心的可点击元素"}
+                        }
+                    })
+            elif action.lower() == "tap_element":
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {
+                        "action": "tap_element",
+                        "params": {"element": element_str or target or text}
+                    }
+                })
+            elif action.lower() == "find_element":
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {
+                        "action": "find_element",
+                        "params": {"element": element_str or target or text}
+                    }
+                })
+            elif action.lower() == "analyze_screen":
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {
+                        "action": "analyze_screen",
+                        "params": {}
+                    }
+                })
             elif action.lower() == "click":
                 tools.append({
                     "name": "device_control",
-                    "arguments": {"action": "click", "params": {}}
+                    "arguments": {
+                        "action": "tap",
+                        "params": {"x": x, "y": y} if x and y else {"target": target}
+                    }
+                })
+            elif action.lower() == "swipe":
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {
+                        "action": "swipe",
+                        "params": {"direction": direction or "down"}
+                    }
                 })
             elif action.lower() in ["swipe_up", "swipe_down", "swipe_left", "swipe_right"]:
                 tools.append({
                     "name": "device_control",
                     "arguments": {"action": "swipe", "params": {"direction": action.lower().replace("swipe_", "")}}
+                })
+            elif action.lower() in ["input", "type"]:
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {
+                        "action": "input",
+                        "params": {"text": text}
+                    }
+                })
+            elif action.lower() == "key":
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {
+                        "action": "key",
+                        "params": {"key": key}
+                    }
+                })
+            elif action.lower() == "wait":
+                duration_pattern = r'duration\s*=\s*["\']?([^"\'\)]+)["\']?'
+                duration_matches = re.findall(duration_pattern, response)
+                duration = duration_matches[i] if i < len(duration_matches) else "1"
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {
+                        "action": "wait",
+                        "params": {"duration": duration}
+                    }
                 })
         
         if do_matches:
