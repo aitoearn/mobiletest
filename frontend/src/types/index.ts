@@ -16,6 +16,7 @@ export interface Message {
   timestamp: Date;
   steps?: ExecutionStep[];
   isStreaming?: boolean;
+  success?: boolean;
 }
 
 export interface Device {
@@ -34,6 +35,9 @@ export interface ChatAPIRequest {
 export interface SSEEvent {
   type: "start" | "message" | "tool_call" | "tool_result" | "done" | "error" | "node";
   content?: string;
+  tool_name?: string;
+  tool_args?: Record<string, unknown>;
+  result?: string;
   data?: {
     node?: string;
     tool_name?: string;

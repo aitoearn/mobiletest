@@ -79,6 +79,7 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
       const decoder = new TextDecoder();
       let buffer = "";
       const steps: ExecutionStep[] = [];
+      let fullContent = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -95,28 +96,28 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
               
               if (data.type === "start") {
                 // Stream started
-              } else if (data.type === "node") {
-                const step: ExecutionStep = {
-                  id: `step-${Date.now()}-${Math.random()}`,
-                  type: "thinking",
-                  content: `执行节点: ${data.data?.node || ""}`,
-                  timestamp: new Date(),
-                };
-                steps.push(step);
+              } else if (data.type === "message") {
+                const msgContent = data.content || "";
+                fullContent += msgContent;
+                setStreamingContent(fullContent);
+                onMessage?.(msgContent);
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === agentMessageId
-                      ? { ...msg, steps: [...steps] }
+                      ? { ...msg, content: fullContent }
                       : msg
                   )
                 );
               } else if (data.type === "tool_call") {
+                const toolName = data.tool_name || data.data?.tool_name || "";
+                const toolArgs = data.tool_args || data.data?.tool_args || {};
+                
                 const step: ExecutionStep = {
                   id: `step-${Date.now()}-${Math.random()}`,
                   type: "tool_call",
-                  content: "调用工具",
-                  toolName: data.data?.tool_name,
-                  toolArgs: data.data?.tool_args,
+                  content: _getToolCallDescription(toolName, toolArgs),
+                  toolName,
+                  toolArgs,
                   timestamp: new Date(),
                 };
                 steps.push(step);
@@ -128,19 +129,18 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
                   )
                 );
               } else if (data.type === "tool_result") {
-                const lastStep = steps[steps.length - 1];
-                if (lastStep && lastStep.type === "tool_call") {
-                  lastStep.toolResult = data.data?.result || data.data?.error;
-                } else {
-                  const step: ExecutionStep = {
-                    id: `step-${Date.now()}-${Math.random()}`,
-                    type: "tool_result",
-                    content: "工具结果",
-                    toolResult: data.data?.result || data.data?.error,
-                    timestamp: new Date(),
-                  };
-                  steps.push(step);
-                }
+                const toolName = data.tool_name || data.data?.tool_name || "";
+                const result = data.result || data.data?.result || "";
+                
+                const step: ExecutionStep = {
+                  id: `step-${Date.now()}-${Math.random()}`,
+                  type: "tool_result",
+                  content: `${toolName} 执行结果`,
+                  toolName,
+                  toolResult: result,
+                  timestamp: new Date(),
+                };
+                steps.push(step);
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === agentMessageId
@@ -148,34 +148,36 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
                       : msg
                   )
                 );
-              } else if (data.type === "message") {
-                const msgContent = data.content || data.data?.message || "";
-                setStreamingContent(msgContent);
-                onMessage?.(msgContent);
+              } else if (data.type === "done") {
+                const finalContent = data.content || fullContent || "执行完成";
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === agentMessageId
-                      ? { ...msg, content: msgContent, isStreaming: false }
-                      : msg
-                  )
-                );
-              } else if (data.type === "done") {
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === agentMessageId && msg.isStreaming
-                      ? { ...msg, content: streamingContent || "执行完成", isStreaming: false }
+                      ? { 
+                          ...msg, 
+                          content: finalContent, 
+                          isStreaming: false,
+                          success: true,
+                          steps: [...steps]
+                        }
                       : msg
                   )
                 );
                 onComplete?.();
               } else if (data.type === "error") {
-                const errorMsg = data.data?.error || "未知错误";
+                const errorMsg = data.data?.error || data.data?.message || "未知错误";
                 setStreamingContent(`错误: ${errorMsg}`);
                 onError?.(errorMsg);
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === agentMessageId
-                      ? { ...msg, content: `错误: ${errorMsg}`, isStreaming: false }
+                      ? { 
+                          ...msg, 
+                          content: `错误: ${errorMsg}`, 
+                          isStreaming: false,
+                          success: false,
+                          steps: [...steps]
+                        }
                       : msg
                   )
                 );
@@ -190,7 +192,13 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === agentMessageId && msg.isStreaming
-            ? { ...msg, content: streamingContent || "执行完成", isStreaming: false }
+            ? { 
+                ...msg, 
+                content: fullContent || "执行完成", 
+                isStreaming: false,
+                success: true,
+                steps: [...steps]
+              }
             : msg
         )
       );
@@ -203,7 +211,12 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === agentMessageId
-            ? { ...msg, content: "请求失败", isStreaming: false }
+            ? { 
+                ...msg, 
+                content: "请求失败", 
+                isStreaming: false,
+                success: false
+              }
             : msg
         )
       );
@@ -211,7 +224,7 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
       setSending(false);
       abortControllerRef.current = null;
     }
-  }, [deviceId, sessionId, sending, streamingContent, onMessage, onComplete, onError]);
+  }, [deviceId, sessionId, sending, onMessage, onComplete, onError]);
 
   const abort = useCallback(() => {
     if (abortControllerRef.current) {
@@ -221,7 +234,12 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
       setMessages((prev) =>
         prev.map((msg) =>
           msg.isStreaming
-            ? { ...msg, content: msg.content || "任务已中断", isStreaming: false }
+            ? { 
+                ...msg, 
+                content: msg.content || "任务已中断", 
+                isStreaming: false,
+                success: false
+              }
             : msg
         )
       );
@@ -241,4 +259,27 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
     abort,
     clear,
   };
+}
+
+function _getToolCallDescription(toolName: string, args: Record<string, unknown>): string {
+  switch (toolName) {
+    case "device_control":
+      const action = args?.action || args?.params?.action || "";
+      switch (action) {
+        case "launch_app":
+          return `启动应用: ${args?.params?.package || ""}`;
+        case "click":
+          return `点击屏幕`;
+        case "swipe":
+          return `滑动: ${args?.params?.direction || ""}`;
+        case "input":
+          return `输入文本: ${args?.params?.text || ""}`;
+        default:
+          return `设备控制: ${action}`;
+      }
+    case "list_devices":
+      return "获取设备列表";
+    default:
+      return `调用工具: ${toolName}`;
+  }
 }
