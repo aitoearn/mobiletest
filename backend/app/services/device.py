@@ -291,17 +291,46 @@ class DeviceControlService:
     
     async def get_current_app(self, device_id: str) -> Optional[str]:
         try:
-            result = await self._run_adb_command(
-                device_id, "shell", "dumpsys", "window", "|", "grep", "-E", "mCurrentFocus"
+            # 使用 dumpsys activity activities 获取当前焦点应用
+            proc = await asyncio.create_subprocess_shell(
+                f"adb -s {device_id} shell 'dumpsys activity activities | grep -E \"mResumedActivity|mFocusedApp\"'",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
-            if "mCurrentFocus" in result:
-                parts = result.split()
-                for i, part in enumerate(parts):
-                    if "mCurrentFocus" in part and i + 1 < len(parts):
-                        return parts[i + 1].rstrip("}")
+            stdout, stderr = await proc.communicate()
+            result = stdout.decode()
+            print(f"[DEBUG] get_current_app raw result: {result[:300] if result else 'empty'}")
+            
+            if result:
+                # 格式: mResumedActivity: ActivityRecord{xxx com.xxx.xxx/com.xxx.Activity}
+                import re
+                # 匹配包名
+                match = re.search(r'([a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+)/', result)
+                if match:
+                    package_name = match.group(1)
+                    print(f"[DEBUG] Parsed package: {package_name}")
+                    return package_name
+            
+            # 备用方案：使用 dumpsys window
+            proc2 = await asyncio.create_subprocess_shell(
+                f"adb -s {device_id} shell 'dumpsys window windows | grep -E \"mCurrentFocus\"'",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout2, stderr2 = await proc2.communicate()
+            result2 = stdout2.decode()
+            print(f"[DEBUG] get_current_app fallback result: {result2[:300] if result2 else 'empty'}")
+            
+            if result2:
+                import re
+                match = re.search(r'([a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+)/', result2)
+                if match:
+                    return match.group(1)
+                    
             return None
         except Exception as e:
             logger.error(f"Failed to get current app: {e}")
+            print(f"[DEBUG] get_current_app error: {e}")
             return None
     
     async def _get_screen_size(self, device_id: str) -> Optional[tuple]:

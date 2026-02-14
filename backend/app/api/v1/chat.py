@@ -72,6 +72,9 @@ def _get_model_config():
 
 @router.post("/stream")
 async def chat_stream(request: ChatAPIRequest):
+    print(f"[ChatAPI] ====== Received stream request ======")
+    print(f"[ChatAPI] device_id={request.device_id}, session_id={request.session_id}")
+    
     last_message = request.messages[-1] if request.messages else None
     if not last_message:
         raise HTTPException(status_code=400, detail="No messages provided")
@@ -89,16 +92,23 @@ async def chat_stream(request: ChatAPIRequest):
     if not device_id:
         raise HTTPException(status_code=400, detail="Device ID is required")
     
+    print(f"[ChatAPI] Creating MobileAgent for device {device_id}")
+    
     async def event_generator():
         try:
             device_service = DeviceService()
             vision_service = VisionService()
             
+            model_config = _get_model_config()
+            print(f"[ChatAPI] Model config: base_url={model_config['base_url']}, model={model_config['model']}")
+            
             agent = MobileAgent(
-                model_config=_get_model_config(),
+                model_config=model_config,
                 device_service=device_service,
                 vision_service=vision_service,
             )
+            
+            print(f"[ChatAPI] Starting agent.stream for task: {last_message.content}")
             
             yield f"data: {json.dumps({'type': 'start'})}\n\n"
             
@@ -106,15 +116,19 @@ async def chat_stream(request: ChatAPIRequest):
                 event_type = event.get("type")
                 event_data = event.get("data", {})
                 
+                print(f"[ChatAPI] Event: {event_type}")
+                
                 if event_type == "thinking":
                     yield f"data: {json.dumps({'type': 'thinking', 'content': event_data.get('chunk', '')})}\n\n"
                 
                 elif event_type == "action":
                     action = event_data.get("action", {})
+                    print(f"[ChatAPI] Action: {action}")
                     yield f"data: {json.dumps({'type': 'tool_call', 'tool_name': action.get('action'), 'tool_args': action})}\n\n"
                 
                 elif event_type == "step":
                     step_data = event_data
+                    print(f"[ChatAPI] Step: {step_data.get('step')}, action: {step_data.get('action')}")
                     yield f"data: {json.dumps({'type': 'step', 'step': step_data.get('step'), 'thinking': step_data.get('thinking'), 'action': step_data.get('action'), 'success': step_data.get('success'), 'finished': step_data.get('finished'), 'message': step_data.get('message')})}\n\n"
                     
                     if step_data.get("finished"):
@@ -131,7 +145,9 @@ async def chat_stream(request: ChatAPIRequest):
             yield f"data: {json.dumps({'type': 'done', 'content': '任务完成'})}\n\n"
             
         except Exception as e:
-            logger.error(f"Stream error: {e}")
+            print(f"[ChatAPI] Stream error: {e}")
+            import traceback
+            traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(

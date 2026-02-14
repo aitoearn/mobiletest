@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Card, Button, Space, Tag, Spin, message } from "antd";
+import { Button, Space, Tag, Spin, message } from "antd";
 import { ArrowLeftOutlined, HistoryOutlined, ClearOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { ScrcpyPlayer } from "@/components/ScrcpyPlayer";
 import { MessageList, ChatInput } from "@/components/chat";

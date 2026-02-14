@@ -63,10 +63,14 @@ class MobileAgent:
                 yield {"type": "error", "data": {"message": "截图失败"}}
                 return
             
+            # 获取当前应用信息
+            current_app = await self.device.get_current_app(device_id)
+            screen_info = self._build_screen_info(current_app)
+            
             initial_message = self._build_user_message(
                 task, 
                 screenshot, 
-                "等待执行任务"
+                screen_info
             )
             self._context.append(initial_message)
             
@@ -101,6 +105,9 @@ class MobileAgent:
     async def _execute_step(self, device_id: str) -> AsyncIterator[dict[str, Any]]:
         self._step_count += 1
         
+        # 截图前短暂等待，确保屏幕内容已稳定
+        await asyncio.sleep(0.5)
+        
         try:
             screenshot = await self.device.screenshot_base64(device_id)
             if not screenshot:
@@ -116,7 +123,12 @@ class MobileAgent:
             yield {"type": "error", "data": {"message": f"设备错误: {e}"}}
             return
         
-        screen_message = self._build_user_message("", screenshot, "当前屏幕状态")
+        # 获取当前应用信息
+        current_app = await self.device.get_current_app(device_id)
+        print(f"[DEBUG] Current app: {current_app}")
+        screen_info = self._build_screen_info(current_app)
+        
+        screen_message = self._build_user_message("", screenshot, screen_info)
         self._context.append(screen_message)
         
         messages = self._get_limited_context()
@@ -196,7 +208,7 @@ class MobileAgent:
             raise
         
         buffer = ""
-        action_markers = ["<answer>", "finish(", "do("]
+        action_markers = ["finish(message=", "do(action="]
         in_action_phase = False
         
         try:
@@ -221,6 +233,7 @@ class MobileAgent:
                     for marker in action_markers:
                         if marker in buffer:
                             thinking_part = buffer.split(marker, 1)[0]
+                            # 移除熟虑和全景标签
                             thinking_part = re.sub(r'^熟虑|全景$', '', thinking_part).strip()
                             if thinking_part:
                                 yield {"type": "thinking", "content": thinking_part}
@@ -250,21 +263,11 @@ class MobileAgent:
     def _parse_action(self, content: str) -> Optional[dict]:
         content = content.strip()
         
-        if "do(action=" in content:
-            match = re.search(r'do\(action\s*=\s*"[^"]+".*?\)', content, re.DOTALL)
-            if match:
-                return self._parse_do(match.group(0))
+        print(f"[DEBUG] Parsing action, content length: {len(content)}")
+        print(f"[DEBUG] Content: {content[:500]}...")
         
-        if "finish(message=" in content:
-            match = re.search(r'finish\(message\s*=\s*"[^"]*"\)', content)
-            if match:
-                return self._parse_finish(match.group(0))
-        
-        if content.startswith("finish("):
-            return self._parse_finish(content)
-        elif content.startswith("do("):
-            return self._parse_do(content)
-        elif "<answer>" in content:
+        # 优先检查 <answer> 标签
+        if "<answer>" in content:
             answer_match = re.search(r'<answer>(.*?)</answer>', content, re.DOTALL)
             if answer_match:
                 answer_content = answer_match.group(1).strip()
@@ -273,16 +276,119 @@ class MobileAgent:
                 elif answer_content.startswith("do("):
                     return self._parse_do(answer_content)
                 elif "do(action=" in answer_content:
-                    match = re.search(r'do\(action\s*=\s*"[^"]+".*?\)', answer_content, re.DOTALL)
-                    if match:
-                        return self._parse_do(match.group(0))
-                    return self._parse_do(answer_content)
+                    return self._parse_do_from_position(answer_content, answer_content.find("do("))
         
-        return None
+        # 检查 finish( 模式
+        finish_idx = content.find("finish(")
+        if finish_idx != -1:
+            print(f"[DEBUG] Found finish( at position {finish_idx}")
+            return self._parse_finish_from_position(content, finish_idx)
+        
+        # 检查 do( 模式
+        do_idx = content.find("do(")
+        if do_idx != -1:
+            print(f"[DEBUG] Found do( at position {do_idx}")
+            return self._parse_do_from_position(content, do_idx)
+        
+        # 如果没有找到标准格式，尝试从文本中提取坐标和意图
+        print(f"[DEBUG] No standard format found, trying to extract from text")
+        return self._extract_action_from_text(content)
+    
+    def _parse_finish_from_position(self, content: str, start_idx: int) -> dict:
+        """从指定位置解析 finish 调用"""
+        # 找到 message= 后面的引号开始位置
+        message_start = content.find("message=", start_idx)
+        if message_start == -1:
+            return {"_metadata": "finish", "message": "任务完成"}
+        
+        # 找到第一个引号
+        quote_start = None
+        quote_char = None
+        for i in range(message_start + 7, min(len(content), message_start + 20)):
+            if content[i] in ('"', "'"):
+                quote_start = i + 1
+                quote_char = content[i]
+                break
+        
+        if quote_start is None:
+            return {"_metadata": "finish", "message": "任务完成"}
+        
+        # 找到匹配的结束引号（处理转义和嵌套）
+        message_end = None
+        i = quote_start
+        while i < len(content):
+            char = content[i]
+            # 处理转义引号
+            if char == '\\' and i + 1 < len(content) and content[i + 1] == quote_char:
+                i += 2
+                continue
+            # 找到结束引号
+            if char == quote_char:
+                message_end = i
+                break
+            i += 1
+        
+        if message_end is None:
+            # 没找到结束引号，取到内容末尾
+            message = content[quote_start:].strip()
+        else:
+            message = content[quote_start:message_end]
+        
+        # 处理转义字符
+        message = message.replace('\\"', '"').replace("\\'", "'")
+        
+        return {
+            "_metadata": "finish",
+            "message": message.strip()
+        }
+    
+    def _parse_do_from_position(self, content: str, start_idx: int) -> dict:
+        """从指定位置解析 do 调用"""
+        # 找到匹配的右括号
+        depth = 0
+        end_idx = start_idx
+        in_quotes = False
+        quote_char = None
+        bracket_depth = 0
+        
+        for i in range(start_idx, len(content)):
+            char = content[i]
+            
+            if char in ('"', "'") and (i == 0 or content[i-1] != '\\'):
+                if not in_quotes:
+                    in_quotes = True
+                    quote_char = char
+                elif char == quote_char:
+                    in_quotes = False
+                    quote_char = None
+            
+            if not in_quotes:
+                if char in ('[', '{'):
+                    bracket_depth += 1
+                elif char in (']', '}'):
+                    bracket_depth -= 1
+                elif char == '(':
+                    depth += 1
+                elif char == ')':
+                    if bracket_depth == 0:
+                        depth -= 1
+                        if depth == 0:
+                            end_idx = i + 1
+                            break
+        
+        action_str = content[start_idx:end_idx]
+        return self._parse_do(action_str)
     
     def _parse_finish(self, action_str: str) -> dict:
-        message_match = re.search(r'finish\(message\s*=\s*["\']([^"\']+)["\']', action_str)
-        message = message_match.group(1) if message_match else "任务完成"
+        # 使用更宽松的正则来匹配多行 message
+        message_match = re.search(r'finish\s*\(\s*message\s*=\s*["\'](.+?)["\']\s*\)', action_str, re.DOTALL)
+        if message_match:
+            message = message_match.group(1).strip()
+        else:
+            # 尝试提取整个 message 内容
+            message_match = re.search(r'message\s*=\s*["\']([^"\']*)', action_str, re.DOTALL)
+            message = message_match.group(1).strip() if message_match else "任务完成"
+        
         return {
             "_metadata": "finish",
             "message": message
@@ -302,6 +408,91 @@ class MobileAgent:
                 result[key] = value
         
         return result
+    
+    def _extract_action_from_text(self, content: str) -> Optional[dict]:
+        """当LLM没有按标准格式输出时，尝试从文本中提取动作意图和坐标"""
+        print(f"[DEBUG] _extract_action_from_text called")
+        
+        # 提取坐标 - 匹配 (x, y) 或 [x, y] 或坐标(x, y) 等格式
+        coord_patterns = [
+            r'坐标\s*[（\(]\s*(\d+)\s*[，,]\s*(\d+)\s*[）\)]',  # 坐标(122, 242)
+            r'[（\(]\s*(\d+)\s*[，,]\s*(\d+)\s*[）\)]',  # (122, 242)
+            r'\[\s*(\d+)\s*[，,]\s*(\d+)\s*\]',  # [122, 242]
+            r'位置\s*[：:]\s*[（\(]?\s*(\d+)\s*[，,]\s*(\d+)\s*[）\)]?',  # 位置: (122, 242)
+        ]
+        
+        coords = None
+        for pattern in coord_patterns:
+            match = re.search(pattern, content)
+            if match:
+                coords = (int(match.group(1)), int(match.group(2)))
+                print(f"[DEBUG] Extracted coords: {coords}")
+                break
+        
+        # 判断动作意图
+        action = None
+        
+        # 点击相关关键词
+        click_keywords = ["点击", "点", "tap", "click", "选择", "按下", "触摸"]
+        if any(kw in content.lower() for kw in click_keywords):
+            action = "Tap"
+        
+        # 滑动相关关键词
+        swipe_keywords = ["滑动", "滑", "swipe", "滚动", "上滑", "下滑", "左滑", "右滑"]
+        if any(kw in content.lower() for kw in swipe_keywords):
+            action = "Swipe"
+            # 判断滑动方向
+            if "上" in content or "up" in content.lower():
+                return {"_metadata": "do", "action": "Swipe", "direction": "up"}
+            elif "下" in content or "down" in content.lower():
+                return {"_metadata": "do", "action": "Swipe", "direction": "down"}
+            elif "左" in content or "left" in content.lower():
+                return {"_metadata": "do", "action": "Swipe", "direction": "left"}
+            elif "右" in content or "right" in content.lower():
+                return {"_metadata": "do", "action": "Swipe", "direction": "right"}
+        
+        # 输入相关关键词
+        input_keywords = ["输入", "打字", "type", "input", "填写"]
+        if any(kw in content.lower() for kw in input_keywords):
+            # 尝试提取要输入的文本
+            text_match = re.search(r'[输入打字填写]\s*[：:"\']?\s*(.+?)[\"\'\n]|text\s*[=:]\s*["\'](.+?)["\']', content, re.IGNORECASE)
+            if text_match:
+                text = text_match.group(1) or text_match.group(2)
+                return {"_metadata": "do", "action": "Type", "text": text.strip()}
+        
+        # 返回/后退关键词
+        back_keywords = ["返回", "后退", "back", "返回上一"]
+        if any(kw in content.lower() for kw in back_keywords):
+            return {"_metadata": "do", "action": "Back"}
+        
+        # 完成关键词
+        finish_keywords = ["完成", "任务完成", "成功", "finish", "done", "已经完成"]
+        if any(kw in content.lower() for kw in finish_keywords):
+            # 检查是否真的完成了任务
+            if "完成" in content or "任务完成" in content:
+                return {"_metadata": "finish", "message": "任务已完成"}
+        
+        # 如果找到了坐标且有点击意图
+        if coords and action == "Tap":
+            # 将实际坐标转换为 1000x1000 坐标系
+            # 注意：这里假设屏幕分辨率大约是 1080x2400，需要根据实际情况调整
+            # 但 autoglm-phone 模型返回的坐标应该已经是标准化的
+            return {
+                "_metadata": "do",
+                "action": "Tap",
+                "element": list(coords)
+            }
+        
+        # 如果只有坐标没有明确动作，默认为点击
+        if coords:
+            return {
+                "_metadata": "do",
+                "action": "Tap",
+                "element": list(coords)
+            }
+        
+        print(f"[DEBUG] Could not extract action from text")
+        return None
     
     def _extract_params(self, action_str: str, function_name: str) -> dict:
         prefix = f"{function_name}("
@@ -378,19 +569,40 @@ class MobileAgent:
                 app = action.get("app", "")
                 package = self._get_package_name(app)
                 success = await self.device.start_app(device_id, package)
+                # 等待应用启动和页面加载
+                print(f"[DEBUG] Launched {app}, waiting for app to load...")
+                await asyncio.sleep(2.0)  # 等待2秒让应用完全加载
                 return {"success": success, "message": f"启动应用: {app}"}
             
             elif action_name == "tap":
                 element = action.get("element", [])
                 if isinstance(element, list) and len(element) >= 2:
-                    x, y = element[0], element[1]
-                    success = await self.device.tap(device_id, x, y)
-                    return {"success": success, "message": f"点击 ({x}, {y})"}
+                    # 坐标是 1000x1000 标准化坐标系，需要转换为实际屏幕坐标
+                    norm_x, norm_y = element[0], element[1]
+                    
+                    # 获取屏幕尺寸
+                    screen_size = await self.device._get_screen_size(device_id)
+                    if screen_size:
+                        screen_width, screen_height = screen_size
+                        # 转换坐标
+                        actual_x = int(norm_x * screen_width / 1000)
+                        actual_y = int(norm_y * screen_height / 1000)
+                        print(f"[DEBUG] Converting coords: ({norm_x}, {norm_y}) -> ({actual_x}, {actual_y}) for screen {screen_width}x{screen_height}")
+                    else:
+                        actual_x, actual_y = norm_x, norm_y
+                        print(f"[DEBUG] Could not get screen size, using raw coords: ({actual_x}, {actual_y})")
+                    
+                    success = await self.device.tap(device_id, actual_x, actual_y)
+                    # 点击后等待页面响应
+                    await asyncio.sleep(1.0)
+                    return {"success": success, "message": f"点击 ({actual_x}, {actual_y})"}
                 return {"success": False, "message": "无效的坐标"}
             
             elif action_name == "type":
                 text = action.get("text", "")
                 success = await self.device.input_text(device_id, text)
+                # 输入后短暂等待
+                await asyncio.sleep(0.5)
                 return {"success": success, "message": f"输入: {text}"}
             
             elif action_name == "swipe":
@@ -472,11 +684,7 @@ class MobileAgent:
     def _build_user_message(self, text: str, screenshot_base64: str, screen_info: str) -> dict:
         content = []
         
-        if text:
-            content.append({"type": "text", "text": text})
-        
-        content.append({"type": "text", "text": f"\n** 屏幕信息 **\n\n{screen_info}"})
-        
+        # 参考 AutoGLM-GUI: 先放图片，再放文字
         content.append({
             "type": "image_url",
             "image_url": {
@@ -484,7 +692,18 @@ class MobileAgent:
             }
         })
         
+        if text:
+            content.append({"type": "text", "text": text})
+        
+        content.append({"type": "text", "text": f"\n** Screen Info **\n\n{screen_info}"})
+        
         return {"role": "user", "content": content}
+    
+    def _build_screen_info(self, current_app: Optional[str]) -> str:
+        """构建屏幕信息 JSON 字符串"""
+        import json
+        info = {"current_app": current_app or "unknown"}
+        return json.dumps(info, ensure_ascii=False)
     
     async def cancel(self):
         self._cancel_event.set()

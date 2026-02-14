@@ -66,7 +66,7 @@ export default function Devices() {
 
   useEffect(() => {
     fetchDevices(true);
-    let interval: NodeJS.Timeout | null = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
     if (autoRefresh) {
       interval = setInterval(() => fetchDevices(false), 5000);
     }

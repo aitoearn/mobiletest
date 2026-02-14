@@ -4,7 +4,6 @@ import {
   Form,
   Input,
   Button,
-  Tabs,
   message,
   Space,
   Divider,
@@ -113,7 +112,6 @@ const AGENT_TYPES = [
 export default function Settings() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("vision");
   const [showVisionApiKey, setShowVisionApiKey] = useState(false);
   const [showDecisionApiKey, setShowDecisionApiKey] = useState(false);
   const [selectedVisionPreset, setSelectedVisionPreset] = useState("");

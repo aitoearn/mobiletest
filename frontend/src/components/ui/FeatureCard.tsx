@@ -1,5 +1,5 @@
 import { Card, Tag } from "antd";
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
 
 interface FeatureCardProps {
   icon: ReactNode;

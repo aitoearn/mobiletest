@@ -33,11 +33,17 @@ export interface ChatAPIRequest {
 }
 
 export interface SSEEvent {
-  type: "start" | "message" | "tool_call" | "tool_result" | "done" | "error" | "node";
+  type: "start" | "thinking" | "message" | "tool_call" | "tool_result" | "done" | "error" | "node" | "step";
   content?: string;
   tool_name?: string;
   tool_args?: Record<string, unknown>;
   result?: string;
+  step?: number;
+  thinking?: string;
+  action?: Record<string, unknown>;
+  success?: boolean;
+  finished?: boolean;
+  message?: string;
   data?: {
     node?: string;
     tool_name?: string;

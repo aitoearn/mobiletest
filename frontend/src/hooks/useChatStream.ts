@@ -96,6 +96,18 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
               
               if (data.type === "start") {
                 // Stream started
+              } else if (data.type === "thinking") {
+                // 显示思考内容
+                const thinkingContent = data.content || "";
+                fullContent += thinkingContent;
+                setStreamingContent(fullContent);
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === agentMessageId
+                      ? { ...msg, content: fullContent }
+                      : msg
+                  )
+                );
               } else if (data.type === "message") {
                 const msgContent = data.content || "";
                 fullContent += msgContent;
@@ -262,20 +274,30 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
 }
 
 function _getToolCallDescription(toolName: string, args: Record<string, unknown>): string {
+  const params = args?.params as Record<string, unknown> | undefined;
+  
   switch (toolName) {
     case "device_control":
-      const action = args?.action || args?.params?.action || "";
+    case "Launch":
+      const action = (args?.action as string) || (params?.action as string) || "";
       switch (action) {
         case "launch_app":
-          return `启动应用: ${args?.params?.package || ""}`;
+        case "Launch":
+          return `启动应用: ${(params?.app as string) || (params?.package as string) || ""}`;
         case "click":
+        case "Tap":
           return `点击屏幕`;
         case "swipe":
-          return `滑动: ${args?.params?.direction || ""}`;
+        case "Swipe":
+          return `滑动: ${(params?.direction as string) || ""}`;
         case "input":
-          return `输入文本: ${args?.params?.text || ""}`;
+        case "Type":
+          return `输入文本: ${(params?.text as string) || ""}`;
         default:
-          return `设备控制: ${action}`;
+          if (toolName === "Launch") {
+            return `启动应用: ${(args?.app as string) || ""}`;
+          }
+          return `设备控制: ${action || toolName}`;
       }
     case "list_devices":
       return "获取设备列表";
