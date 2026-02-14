@@ -9,6 +9,8 @@ class LLMProvider(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     QWEN = "qwen"
+    ZHIPU = "zhipu"
+    MODELSCOPE = "modelscope"
     LOCAL = "local"
 
 
@@ -53,7 +55,12 @@ class OpenAILLM(BaseLLM):
         except ImportError:
             raise ImportError("openai package not installed")
         
-        client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+        import httpx
+        client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            http_client=httpx.AsyncClient(proxy=None)
+        )
         
         response = await client.chat.completions.create(
             model=self.model,
@@ -79,7 +86,12 @@ class OpenAILLM(BaseLLM):
         except ImportError:
             raise ImportError("openai package not installed")
         
-        client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+        import httpx
+        client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            http_client=httpx.AsyncClient(proxy=None)
+        )
         
         stream = await client.chat.completions.create(
             model=self.model,
@@ -170,9 +182,11 @@ class QwenLLM(BaseLLM):
         except ImportError:
             raise ImportError("openai package not installed")
         
+        import httpx
         client = AsyncOpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
+            http_client=httpx.AsyncClient(proxy=None)
         )
         
         response = await client.chat.completions.create(
@@ -199,9 +213,135 @@ class QwenLLM(BaseLLM):
         except ImportError:
             raise ImportError("openai package not installed")
         
+        import httpx
         client = AsyncOpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
+            http_client=httpx.AsyncClient(proxy=None)
+        )
+        
+        stream = await client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": m.role, "content": m.content} for m in messages],
+            stream=True,
+            **kwargs
+        )
+        
+        async for chunk in stream:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+
+class ZhipuLLM(BaseLLM):
+    def __init__(self, model: str = "glm-4-plus", api_key: Optional[str] = None, base_url: Optional[str] = None):
+        super().__init__(model, api_key, base_url)
+        self.api_key = api_key or os.getenv("ZHIPU_API_KEY")
+        self.base_url = base_url or "https://open.bigmodel.cn/api/paas/v4"
+    
+    async def chat(self, messages: List[Message], **kwargs) -> LLMResponse:
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("openai package not installed")
+        
+        import httpx
+        client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            http_client=httpx.AsyncClient(proxy=None)
+        )
+        
+        response = await client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": m.role, "content": m.content} for m in messages],
+            **kwargs
+        )
+        
+        choice = response.choices[0]
+        return LLMResponse(
+            content=choice.message.content or "",
+            model=response.model,
+            usage={
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            },
+            finish_reason=choice.finish_reason,
+        )
+    
+    async def stream_chat(self, messages: List[Message], **kwargs):
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("openai package not installed")
+        
+        import httpx
+        client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            http_client=httpx.AsyncClient(proxy=None)
+        )
+        
+        stream = await client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": m.role, "content": m.content} for m in messages],
+            stream=True,
+            **kwargs
+        )
+        
+        async for chunk in stream:
+            if chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+
+class ModelScopeLLM(BaseLLM):
+    def __init__(self, model: str = "Qwen/Qwen2.5-72B-Instruct", api_key: Optional[str] = None, base_url: Optional[str] = None):
+        super().__init__(model, api_key, base_url)
+        self.api_key = api_key or os.getenv("MODELSCOPE_API_KEY")
+        self.base_url = base_url or "https://api-inference.modelscope.cn/v1"
+    
+    async def chat(self, messages: List[Message], **kwargs) -> LLMResponse:
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("openai package not installed")
+        
+        import httpx
+        client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            http_client=httpx.AsyncClient(proxy=None)
+        )
+        
+        response = await client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": m.role, "content": m.content} for m in messages],
+            **kwargs
+        )
+        
+        choice = response.choices[0]
+        return LLMResponse(
+            content=choice.message.content or "",
+            model=response.model,
+            usage={
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            },
+            finish_reason=choice.finish_reason,
+        )
+    
+    async def stream_chat(self, messages: List[Message], **kwargs):
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("openai package not installed")
+        
+        import httpx
+        client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            http_client=httpx.AsyncClient(proxy=None)
         )
         
         stream = await client.chat.completions.create(
@@ -223,8 +363,12 @@ def get_llm(provider: LLMProvider, model: Optional[str] = None, **kwargs) -> Bas
         return AnthropicLLM(model=model or "claude-sonnet-4-20250514", **kwargs)
     elif provider == LLMProvider.QWEN:
         return QwenLLM(model=model or "qwen-max", **kwargs)
+    elif provider == LLMProvider.ZHIPU:
+        return ZhipuLLM(model=model or "glm-4-plus", **kwargs)
+    elif provider == LLMProvider.MODELSCOPE:
+        return ModelScopeLLM(model=model or "Qwen/Qwen2.5-72B-Instruct", **kwargs)
     else:
-        raise ValueError(f"Unsupported provider: {provider}")
+        return OpenAILLM(model=model or "gpt-4o", **kwargs)
 
 
 import json

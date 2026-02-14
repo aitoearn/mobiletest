@@ -1,81 +1,113 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 import os
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 class LLMConfig(BaseModel):
-    provider: str
-    model: str
-    apiKey: str
-    baseUrl: str
+    provider: Optional[str] = "openai"
+    model: Optional[str] = "gpt-4o"
+    apiKey: Optional[str] = ""
+    baseUrl: Optional[str] = ""
+    agentType: Optional[str] = "glm-async"
+    agentConfigParams: Optional[Dict[str, Any]] = {}
+    defaultMaxSteps: Optional[int] = 100
+    layeredMaxTurns: Optional[int] = 50
+    visionBaseUrl: Optional[str] = ""
+    visionModelName: Optional[str] = ""
+    visionApiKey: Optional[str] = ""
+    decisionBaseUrl: Optional[str] = ""
+    decisionModelName: Optional[str] = ""
+    decisionApiKey: Optional[str] = ""
 
 
-def _load_env_file():
-    env_file = "/Users/lisq/ai/mobileagent/mobiletest/backend/.env"
-    env_vars = {}
-    if os.path.exists(env_file):
-        with open(env_file, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    env_vars[key] = value
-    return env_vars
+CONFIG_FILE = "/Users/lisq/ai/mobileagent/mobiletest/backend/config.json"
 
 
-def _save_env_file(env_vars: dict):
-    env_file = "/Users/lisq/ai/mobileagent/mobiletest/backend/.env"
-    with open(env_file, "w") as f:
-        for key, value in env_vars.items():
-            f.write(f"{key}={value}\n")
+def _load_config() -> dict:
+    import json
+    default = {
+        "provider": "openai",
+        "model": "gpt-4o",
+        "apiKey": "",
+        "baseUrl": "",
+        "agentType": "glm-async",
+        "agentConfigParams": {},
+        "defaultMaxSteps": 100,
+        "layeredMaxTurns": 50,
+        "visionBaseUrl": "",
+        "visionModelName": "",
+        "visionApiKey": "",
+        "decisionBaseUrl": "",
+        "decisionModelName": "",
+        "decisionApiKey": "",
+    }
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                return {**default, **json.load(f)}
+        except:
+            pass
+    return default
+
+
+def _save_config(config: dict):
+    import json
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config, f, indent=2)
 
 
 @router.get("/llm")
 async def get_llm_config():
-    env_vars = _load_env_file()
-    return {
-        "provider": env_vars.get("LLM_PROVIDER", "openai"),
-        "model": env_vars.get("LLM_MODEL", "gpt-4o"),
-        "apiKey": env_vars.get("LLM_API_KEY", ""),
-        "baseUrl": env_vars.get("LLM_BASE_URL", ""),
-    }
+    config = _load_config()
+    return config
 
 
 @router.post("/llm")
 async def save_llm_config(config: LLMConfig):
-    env_vars = _load_env_file()
+    config_dict = config.model_dump()
+    _save_config(config_dict)
     
-    env_vars["LLM_PROVIDER"] = config.provider
-    env_vars["LLM_MODEL"] = config.model
-    if config.apiKey:
-        env_vars["LLM_API_KEY"] = config.apiKey
-    if config.baseUrl:
-        env_vars["LLM_BASE_URL"] = config.baseUrl
-    
-    _save_env_file(env_vars)
-    return {"success": True}
+    return {"success": True, "message": "配置已保存，重启后生效"}
 
 
 @router.post("/llm/test")
 async def test_llm_connection():
     from app.agent.llm.llm import get_llm, LLMProvider, Message
-    from app.core.config import settings
+    import traceback
+    
+    config = _load_config()
+    
+    vision_base_url = config.get("visionBaseUrl", "")
+    vision_model_name = config.get("visionModelName", "")
+    vision_api_key = config.get("visionApiKey", "")
+    
+    if not vision_base_url or not vision_model_name:
+        return {"success": False, "message": "请先配置视觉模型 Base URL 和模型名称"}
+    
+    if not vision_api_key:
+        return {"success": False, "message": "请先配置 API Key"}
+    
+    if not vision_base_url.startswith(("http://", "https://")):
+        return {"success": False, "message": "Base URL 必须以 http:// 或 https:// 开头"}
     
     try:
-        env_vars = _load_env_file()
-        provider = env_vars.get("LLM_PROVIDER", "openai")
-        model = env_vars.get("LLM_MODEL", "gpt-4o")
-        api_key = env_vars.get("LLM_API_KEY", "")
-        base_url = env_vars.get("LLM_BASE_URL", "")
+        provider = LLMProvider.OPENAI
+        if "bigmodel.cn" in vision_base_url:
+            provider = LLMProvider.ZHIPU
+        elif "modelscope.cn" in vision_base_url:
+            provider = LLMProvider.MODELSCOPE
+        elif "dashscope.aliyuncs.com" in vision_base_url:
+            provider = LLMProvider.QWEN
         
         llm = get_llm(
-            LLMProvider(provider),
-            model,
-            api_key=api_key or None,
-            base_url=base_url or None
+            provider,
+            vision_model_name,
+            api_key=vision_api_key,
+            base_url=vision_base_url
         )
         
         test_messages = [Message(role="user", content="Hello")]
@@ -83,4 +115,11 @@ async def test_llm_connection():
         
         return {"success": True, "message": "连接成功", "response": response.content[:100]}
     except Exception as e:
-        return {"success": False, "message": str(e)}
+        error_detail = traceback.format_exc()
+        print(f"LLM Test Error: {error_detail}")
+        return {"success": False, "message": f"{str(e)}", "detail": error_detail}
+
+
+@router.post("/reinit")
+async def reinit_agents():
+    return {"success": True, "total": 0, "succeeded": [], "failed": {}}
