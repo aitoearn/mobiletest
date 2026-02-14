@@ -249,17 +249,22 @@ async def chat_stream(request: ChatAPIRequest):
             yield f"data: {json.dumps({'type': 'start'})}\n\n"
             
             tool_calls = []
+            full_response = ""
             
             async for response in llm_client.chat_stream(all_messages):
                 if response:
-                    content, tools = llm_client.extract_tools(response)
-                    if content:
-                        yield f"data: {json.dumps({'type': 'message', 'content': content})}\n\n"
-                    
-                    if tools:
-                        for tool in tools:
-                            tool_calls.append(tool)
-                            yield f"data: {json.dumps({'type': 'tool_call', 'tool_name': tool.get('name'), 'tool_args': tool.get('arguments', {})})}\n\n"
+                    full_response += response
+                    yield f"data: {json.dumps({'type': 'message', 'content': response})}\n\n"
+            
+            print(f"[DEBUG] Full LLM response: {full_response[:500]}")
+            
+            content, tools = llm_client.extract_tools(full_response)
+            print(f"[DEBUG] Extracted tools: {tools}")
+            
+            if tools:
+                for tool in tools:
+                    tool_calls.append(tool)
+                    yield f"data: {json.dumps({'type': 'tool_call', 'tool_name': tool.get('name'), 'tool_args': tool.get('arguments', {})})}\n\n"
             
             for tool in tool_calls:
                 tool_name = tool.get("name")
@@ -269,16 +274,17 @@ async def chat_stream(request: ChatAPIRequest):
                 if tool_name == "list_devices":
                     result = await _list_devices()
                 elif tool_name == "device_control":
-                    device_id = tool_args.get("device_id") or request.device_id
+                    device_id = tool_args.get("device_id") or tool_args.get("params", {}).get("device_id") or request.device_id
                     action = tool_args.get("action", "")
                     params = tool_args.get("params", {})
+                    print(f"[DEBUG] device_control: device_id={device_id}, action={action}, params={params}")
                     result = await _device_control(device_id, action, params)
                 
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tool_name, 'result': result})}\n\n"
             
             assistant_message = {
                 "role": "assistant",
-                "content": "任务完成",
+                "content": full_response or "任务完成",
                 "timestamp": datetime.now().isoformat(),
             }
             session.messages.append(assistant_message)
@@ -286,6 +292,8 @@ async def chat_stream(request: ChatAPIRequest):
             yield f"data: {json.dumps({'type': 'done', 'content': '任务完成'})}\n\n"
             
         except Exception as e:
+            import traceback
+            print(f"[ERROR] chat_stream error: {traceback.format_exc()}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(

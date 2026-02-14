@@ -378,18 +378,32 @@ from app.core.config import settings
 
 class LLMClient:
     def __init__(self, provider: Optional[LLMProvider] = None, model: Optional[str] = None):
-        if provider is None:
-            provider_str = os.getenv("LLM_PROVIDER", "openai").lower()
-            provider = LLMProvider(provider_str)
+        config = self._load_config()
         
-        provider = provider or settings.llm_provider
-        model = model or settings.llm_model
+        if provider is None:
+            provider_str = config.get("provider", os.getenv("LLM_PROVIDER", "openai")).lower()
+            try:
+                provider = LLMProvider(provider_str)
+            except ValueError:
+                provider = LLMProvider.OPENAI
+        
+        vision_base_url = config.get("visionBaseUrl", "")
+        if "bigmodel.cn" in vision_base_url:
+            provider = LLMProvider.ZHIPU
+        elif "modelscope.cn" in vision_base_url:
+            provider = LLMProvider.MODELSCOPE
+        elif "dashscope.aliyuncs.com" in vision_base_url:
+            provider = LLMProvider.QWEN
+        
+        model = model or config.get("visionModelName") or settings.llm_model
+        api_key = config.get("visionApiKey") or settings.llm_api_key or None
+        base_url = config.get("visionBaseUrl") or settings.llm_base_url or None
         
         self.llm = get_llm(
             provider,
             model,
-            api_key=settings.llm_api_key or None,
-            base_url=settings.llm_base_url or None
+            api_key=api_key,
+            base_url=base_url
         )
         self.tools = [
             {
@@ -422,6 +436,17 @@ class LLMClient:
             }
         ]
     
+    def _load_config(self) -> dict:
+        import json
+        config_file = "/Users/lisq/ai/mobileagent/mobiletest/backend/config.json"
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, "r") as f:
+                    return json.load(f)
+            except:
+                pass
+        return {}
+    
     async def chat_stream(self, messages: list[dict]):
         msg_objects = [Message(role=m["role"], content=m["content"]) for m in messages]
         
@@ -432,7 +457,6 @@ class LLMClient:
         content = ""
         tools = []
         
-        tool_pattern = r'\{[\s\S]*?"function"[\s\S]*?\}'
         json_blocks = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response)
         
         for block in json_blocks:
@@ -447,5 +471,56 @@ class LLMClient:
             except:
                 pass
         
+        do_pattern = r'do\s*\(\s*action\s*=\s*["\']?(\w+)["\']?'
+        app_pattern = r'app\s*=\s*["\']([^"\']+)["\']'
+        
+        do_matches = re.findall(do_pattern, response)
+        app_matches = re.findall(app_pattern, response)
+        
+        print(f"[DEBUG] do_matches: {do_matches}, app_matches: {app_matches}")
+        
+        for i, action in enumerate(do_matches):
+            app = app_matches[i] if i < len(app_matches) else ""
+            if action.lower() == "launch":
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {
+                        "action": "launch_app",
+                        "params": {"package": self._get_package_name(app.strip())}
+                    }
+                })
+            elif action.lower() == "click":
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {"action": "click", "params": {}}
+                })
+            elif action.lower() in ["swipe_up", "swipe_down", "swipe_left", "swipe_right"]:
+                tools.append({
+                    "name": "device_control",
+                    "arguments": {"action": "swipe", "params": {"direction": action.lower().replace("swipe_", "")}}
+                })
+        
+        if do_matches:
+            response = re.sub(r'do\s*\([^)]*\)', "", response)
+        
         content = response.strip()
         return content, tools
+    
+    def _get_package_name(self, app_name: str) -> str:
+        packages = {
+            "京东": "com.jingdong.app.mall",
+            "淘宝": "com.taobao.taobao",
+            "微信": "com.tencent.mm",
+            "支付宝": "com.eg.android.AlipayGphone",
+            "抖音": "com.ss.android.ugc.aweme",
+            "快手": "com.smile.gifmaker",
+            "美团": "com.sankuai.meituan",
+            "拼多多": "com.xunmeng.pinduoduo",
+            "微博": "com.sina.weibo",
+            "QQ": "com.tencent.mobileqq",
+            "高德地图": "com.autonavi.minimap",
+            "百度地图": "com.baidu.BaiduMap",
+            "网易云音乐": "com.netease.cloudmusic",
+            "QQ音乐": "com.tencent.qqmusic",
+        }
+        return packages.get(app_name, app_name)
