@@ -264,7 +264,7 @@ class MobileAgent:
         content = content.strip()
         
         print(f"[DEBUG] Parsing action, content length: {len(content)}")
-        print(f"[DEBUG] Content: {content[:500]}...")
+        print(f"[DEBUG] Content: {content[:900]}...")
         
         # 优先检查 <answer> 标签
         if "<answer>" in content:

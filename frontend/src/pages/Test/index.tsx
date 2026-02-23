@@ -121,7 +121,7 @@ export default function Test() {
               <div>
                 <h2 className="text-xl font-bold mb-1">UI Genie 智能驱动</h2>
                 <p className="text-sm text-gray-500">
-                  请在右侧输入框描述操作，或直接输入具体指令
+                  请在右侧输入框描述操作，或直接输入具体指令:
                 </p>
               </div>
             </div>
