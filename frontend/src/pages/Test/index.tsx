@@ -1,11 +1,19 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Button, Space, Tag, Spin, message } from "antd";
-import { ArrowLeftOutlined, HistoryOutlined, ClearOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { Button, Space, Tag, Spin, message, Select } from "antd";
+import { ArrowLeftOutlined, HistoryOutlined, ClearOutlined, ThunderboltOutlined, RobotOutlined } from "@ant-design/icons";
 import { ScrcpyPlayer } from "@/components/ScrcpyPlayer";
 import { MessageList, ChatInput } from "@/components/chat";
 import { useChatStream } from "@/hooks/useChatStream";
 import type { Device } from "@/types";
+
+const { Option } = Select;
+
+interface Engine {
+  id: string;
+  name: string;
+  model: string;
+}
 
 export default function Test() {
   const { deviceId } = useParams<{ deviceId: string }>();
@@ -13,9 +21,12 @@ export default function Test() {
   const [device, setDevice] = useState<Device | null>(null);
   const [loading, setLoading] = useState(true);
   const [inputValue, setInputValue] = useState("");
+  const [engines, setEngines] = useState<Engine[]>([]);
+  const [selectedEngineId, setSelectedEngineId] = useState<string>("");
 
   const { messages, sending, sendMessage, abort, clear } = useChatStream({
     deviceId,
+    engineId: selectedEngineId || undefined,  // 传递选中的引擎ID
     onError: (error) => message.error(`错误: ${error}`),
   });
 
@@ -41,7 +52,25 @@ export default function Test() {
       }
     };
 
+    // 获取引擎列表
+    const fetchEngines = async () => {
+      try {
+        const response = await fetch("/api/v1/engines");
+        const data = await response.json();
+        if (data.code === 0 && data.data) {
+          setEngines(data.data);
+          // 如果有引擎，默认选择第一个
+          if (data.data.length > 0) {
+            setSelectedEngineId(data.data[0].id);
+          }
+        }
+      } catch (error) {
+        console.error("获取引擎列表失败:", error);
+      }
+    };
+
     fetchDevice();
+    fetchEngines();
   }, [deviceId, navigate]);
 
   const handleSend = () => {
@@ -114,15 +143,38 @@ export default function Test() {
 
         <div className="flex-1 flex flex-col bg-white">
           <div className="px-6 py-4 border-b">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-green-600 rounded-lg flex items-center justify-center">
-                <ThunderboltOutlined style={{ fontSize: 24, color: "white" }} />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-green-600 rounded-lg flex items-center justify-center">
+                  <ThunderboltOutlined style={{ fontSize: 24, color: "white" }} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold mb-1">UI 智能驱动</h2>
+                  <p className="text-sm text-gray-500">
+                    请在右侧输入框描述操作，或直接输入具体指令:
+                  </p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-xl font-bold mb-1">UI Genie 智能驱动</h2>
-                <p className="text-sm text-gray-500">
-                  请在右侧输入框描述操作，或直接输入具体指令:
-                </p>
+              
+              {/* 引擎选择器 */}
+              <div className="flex items-center gap-2">
+                <RobotOutlined className="text-gray-400" />
+                <Select
+                  placeholder="选择执行引擎"
+                  value={selectedEngineId}
+                  onChange={setSelectedEngineId}
+                  style={{ width: 200 }}
+                  className="rounded-lg"
+                >
+                  {engines.map((engine) => (
+                    <Option key={engine.id} value={engine.id}>
+                      <div className="flex items-center gap-2">
+                        <span>{engine.name}</span>
+                        <span className="text-xs text-gray-400">{engine.model}</span>
+                      </div>
+                    </Option>
+                  ))}
+                </Select>
               </div>
             </div>
           </div>

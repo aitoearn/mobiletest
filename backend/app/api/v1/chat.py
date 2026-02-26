@@ -3,13 +3,16 @@ import os
 import asyncio
 from datetime import datetime
 from typing import Optional, AsyncGenerator
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.services.device import DeviceControlService as DeviceService
 from app.services.vision import VisionService
 from app.agent.mobile_agent import MobileAgent
+from app.models import Engine
+from app.core.database import get_db
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,6 +29,7 @@ class ChatAPIRequest(BaseModel):
     messages: list[Message]
     device_id: Optional[str] = None
     session_id: Optional[str] = None
+    engine_id: Optional[str] = None  # 新增：引擎ID
 
 
 class ChatResponseV1(BaseModel):
@@ -61,19 +65,31 @@ def _load_config() -> dict:
     return {}
 
 
-def _get_model_config():
+def _get_model_config(engine: Optional[Engine] = None):
+    """获取模型配置，优先使用引擎配置"""
+    if engine:
+        # 使用引擎配置
+        return {
+            "base_url": engine.base_url or "https://open.bigmodel.cn/api/paas/v4",
+            "api_key": engine.api_key or "",
+            "model": engine.model or "autoglm-phone",
+            "system_prompt": engine.prompt,  # 引擎的提示词作为系统提示词
+        }
+    
+    # 使用默认配置
     config = _load_config()
     return {
         "base_url": config.get("baseUrl") or "https://open.bigmodel.cn/api/paas/v4",
         "api_key": config.get("apiKey") or "",
         "model": config.get("model") or "autoglm-phone",
+        "system_prompt": None,
     }
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatAPIRequest):
+async def chat_stream(request: ChatAPIRequest, db: Session = Depends(get_db)):
     print(f"[ChatAPI] ====== Received stream request ======")
-    print(f"[ChatAPI] device_id={request.device_id}, session_id={request.session_id}")
+    print(f"[ChatAPI] device_id={request.device_id}, session_id={request.session_id}, engine_id={request.engine_id}")
     
     last_message = request.messages[-1] if request.messages else None
     if not last_message:
@@ -92,6 +108,15 @@ async def chat_stream(request: ChatAPIRequest):
     if not device_id:
         raise HTTPException(status_code=400, detail="Device ID is required")
     
+    # 加载引擎配置
+    engine = None
+    if request.engine_id:
+        engine = db.get(Engine, request.engine_id)
+        if engine:
+            print(f"[ChatAPI] Using engine: {engine.name} (model: {engine.model})")
+        else:
+            print(f"[ChatAPI] Engine {request.engine_id} not found, using default config")
+    
     print(f"[ChatAPI] Creating MobileAgent for device {device_id}")
     
     async def event_generator():
@@ -99,7 +124,7 @@ async def chat_stream(request: ChatAPIRequest):
             device_service = DeviceService()
             vision_service = VisionService()
             
-            model_config = _get_model_config()
+            model_config = _get_model_config(engine)
             print(f"[ChatAPI] Model config: base_url={model_config['base_url']}, model={model_config['model']}")
             
             agent = MobileAgent(

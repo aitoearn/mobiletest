@@ -4,6 +4,7 @@ import type { Message, ExecutionStep, SSEEvent } from "@/types";
 interface UseChatStreamOptions {
   deviceId?: string;
   sessionId?: string;
+  engineId?: string;  // 新增：引擎ID
   onMessage?: (content: string) => void;
   onComplete?: () => void;
   onError?: (error: string) => void;
@@ -19,7 +20,7 @@ interface UseChatStreamReturn {
 }
 
 export function useChatStream(options: UseChatStreamOptions = {}): UseChatStreamReturn {
-  const { deviceId, sessionId, onMessage, onComplete, onError } = options;
+  const { deviceId, sessionId, engineId, onMessage, onComplete, onError } = options;
   
   const [messages, setMessages] = useState<Message[]>([]);
   const [sending, setSending] = useState(false);
@@ -63,6 +64,7 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
           messages: [{ role: "user", content }],
           device_id: deviceId,
           session_id: sessionId,
+          engine_id: engineId,  // 新增：传递引擎ID
         }),
         signal: controller.signal,
       });
@@ -236,7 +238,7 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
       setSending(false);
       abortControllerRef.current = null;
     }
-  }, [deviceId, sessionId, sending, onMessage, onComplete, onError]);
+  }, [deviceId, sessionId, engineId, sending, onMessage, onComplete, onError]);
 
   const abort = useCallback(() => {
     if (abortControllerRef.current) {

@@ -48,8 +48,11 @@ class MobileAgent:
         self._cancel_event = asyncio.Event()
         self._context: list[dict] = []
         
+        # 优先使用传入的系统提示词（来自引擎配置），否则使用默认提示词
         from .prompts import SYSTEM_PROMPT
-        self.system_prompt = SYSTEM_PROMPT
+        custom_prompt = model_config.get("system_prompt")
+        self.system_prompt = custom_prompt if custom_prompt else SYSTEM_PROMPT
+        logger.info(f"MobileAgent using {'custom' if custom_prompt else 'default'} system prompt")
     
     async def stream(self, task: str, device_id: str) -> AsyncIterator[dict[str, Any]]:
         self._is_running = True

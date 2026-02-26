@@ -4,6 +4,7 @@ import MainLayout from '@/components/layout/MainLayout'
 import Dashboard from '@/pages/Dashboard'
 import Cases from '@/pages/Cases'
 import Executions from '@/pages/Executions'
+import Engines from '@/pages/Engines'
 import Devices from '@/pages/Devices'
 import Reports from '@/pages/Reports'
 import Settings from '@/pages/Settings'
@@ -32,6 +33,7 @@ function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/cases" element={<Cases />} />
                 <Route path="/executions" element={<Executions />} />
+                <Route path="/engines" element={<Engines />} />
                 <Route path="/devices" element={<Devices />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/settings" element={<Settings />} />

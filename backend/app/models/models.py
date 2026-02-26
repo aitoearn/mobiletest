@@ -135,3 +135,16 @@ class ExecutionStep(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     execution = relationship("TestExecution", back_populates="steps")
+
+
+class Engine(Base):
+    __tablename__ = "engines"
+
+    id = Column(String(36), primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    model = Column(String(100), nullable=False)
+    prompt = Column(Text, nullable=False)
+    base_url = Column(String(500), default="")
+    api_key = Column(String(500), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
