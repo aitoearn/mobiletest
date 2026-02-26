@@ -8,6 +8,8 @@ import {
   Space,
   Divider,
   Tooltip,
+  Select,
+  Spin,
 } from "antd";
 import {
   SaveOutlined,
@@ -16,54 +18,40 @@ import {
   EyeInvisibleOutlined,
   GlobalOutlined,
   ApiOutlined,
-  RobotOutlined,
-  ThunderboltOutlined,
-  InfoCircleOutlined,
   LinkOutlined,
   SettingOutlined,
   CheckCircleOutlined,
+  CloudSyncOutlined,
 } from "@ant-design/icons";
 
+const { Option } = Select;
+
 interface LLMConfig {
-  provider: string;
-  model: string;
-  apiKey: string;
   baseUrl: string;
-  agentType: string;
+  apiKey: string;
+  selectedModels: string[];
   defaultMaxSteps: number;
   layeredMaxTurns: number;
-  visionBaseUrl: string;
-  visionModelName: string;
-  visionApiKey: string;
-  decisionBaseUrl: string;
-  decisionModelName: string;
-  decisionApiKey: string;
+  // 为每个供应商保存独立的 API Key 和模型
+  providerApiKeys: Record<string, string>;
+  providerModels: Record<string, string[]>;
 }
 
-const VISION_PRESETS = [
+interface ModelInfo {
+  id: string;
+  name: string;
+  description?: string;
+}
+
+const PROVIDER_PRESETS = [
   {
     name: "bigmodel",
     displayName: "智谱 BigModel",
     description: "智谱 AI GLM 系列模型",
     icon: "🤖",
     color: "#3b82f6",
-    config: {
-      baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-      modelName: "glm-4-plus",
-    },
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     apiKeyUrl: "https://open.bigmodel.cn/api-keys",
-  },
-  {
-    name: "modelscope",
-    displayName: "ModelScope",
-    description: "阿里云魔搭社区模型服务",
-    icon: "🔬",
-    color: "#8b5cf6",
-    config: {
-      baseUrl: "https://api-inference.modelscope.cn/v1",
-      modelName: "Qwen/Qwen2.5-72B-Instruct",
-    },
-    apiKeyUrl: "https://modelscope.cn/my/myaccesstoken",
   },
   {
     name: "qwen",
@@ -71,11 +59,17 @@ const VISION_PRESETS = [
     description: "阿里云 DashScope API 服务",
     icon: "☁️",
     color: "#ff6a00",
-    config: {
-      baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-      modelName: "qwen-max",
-    },
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     apiKeyUrl: "https://dashscope.console.aliyun.com/apiKey",
+  },
+  {
+    name: "modelscope",
+    displayName: "阿里云魔搭社区",
+    description: "阿里云魔搭社区模型服务",
+    icon: "🔬",
+    color: "#8b5cf6",
+    baseUrl: "https://api-inference.modelscope.cn/v1",
+    apiKeyUrl: "https://modelscope.cn/my/myaccesstoken",
   },
   {
     name: "custom",
@@ -83,39 +77,18 @@ const VISION_PRESETS = [
     description: "vLLM / Ollama 等自建服务",
     icon: "🔧",
     color: "#6b7280",
-    config: {
-      baseUrl: "http://localhost:11434/v1",
-      modelName: "local-model",
-    },
-  },
-];
-
-const DECISION_PRESETS = [...VISION_PRESETS];
-
-const AGENT_TYPES = [
-  {
-    name: "glm-async",
-    displayName: "GLM Agent",
-    description: "基于 GLM 模型优化，成熟稳定，适合大多数任务",
-    icon: <RobotOutlined />,
-    color: "#1890ff",
-  },
-  {
-    name: "mai",
-    displayName: "MAI Agent",
-    description: "阿里通义团队开发，支持多张历史截图上下文",
-    icon: <ThunderboltOutlined />,
-    color: "#722ed1",
+    baseUrl: "http://localhost:11434/v1",
+    apiKeyUrl: null,
   },
 ];
 
 export default function Settings() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const [showVisionApiKey, setShowVisionApiKey] = useState(false);
-  const [showDecisionApiKey, setShowDecisionApiKey] = useState(false);
-  const [selectedVisionPreset, setSelectedVisionPreset] = useState("");
-  const [selectedDecisionPreset, setSelectedDecisionPreset] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [selectedPreset, setSelectedPreset] = useState("");
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
 
   useEffect(() => {
     fetchConfig();
@@ -126,20 +99,35 @@ export default function Settings() {
       const res = await fetch("/api/v1/settings/llm");
       if (res.ok) {
         const data = await res.json();
-        form.setFieldsValue(data);
         
-        const visionPreset = VISION_PRESETS.find(
-          (p) => p.config.baseUrl === data.visionBaseUrl
+        // 找到匹配的供应商
+        const preset = PROVIDER_PRESETS.find(
+          (p) => p.baseUrl === data.baseUrl
         );
-        if (visionPreset) {
-          setSelectedVisionPreset(visionPreset.name);
-        }
         
-        const decisionPreset = DECISION_PRESETS.find(
-          (p) => p.config.baseUrl === data.decisionBaseUrl
-        );
-        if (decisionPreset) {
-          setSelectedDecisionPreset(decisionPreset.name);
+        if (preset) {
+          setSelectedPreset(preset.name);
+          
+          // 加载该供应商对应的 API Key 和模型
+          const providerApiKeys = data.providerApiKeys || {};
+          const providerModels = data.providerModels || {};
+          const savedApiKey = providerApiKeys[preset.name] || data.apiKey || "";
+          const savedModels = providerModels[preset.name] || data.selectedModels || [];
+          
+          form.setFieldsValue({
+            ...data,
+            apiKey: savedApiKey,
+            selectedModels: savedModels,
+          });
+          
+          // 如果有已保存的模型，设置到可用模型列表
+          if (savedModels.length > 0) {
+            setAvailableModels(
+              savedModels.map((m: string) => ({ id: m, name: m, description: "多模态" }))
+            );
+          }
+        } else {
+          form.setFieldsValue(data);
         }
       }
     } catch (error) {
@@ -150,10 +138,29 @@ export default function Settings() {
   const handleSave = async (values: LLMConfig) => {
     setLoading(true);
     try {
+      // 保存当前供应商的 API Key 和模型到对应的对象中
+      const providerApiKeys = values.providerApiKeys || {};
+      const providerModels = values.providerModels || {};
+      
+      if (selectedPreset) {
+        if (values.apiKey) {
+          providerApiKeys[selectedPreset] = values.apiKey;
+        }
+        if (values.selectedModels) {
+          providerModels[selectedPreset] = values.selectedModels;
+        }
+      }
+      
+      const saveData = {
+        ...values,
+        providerApiKeys,
+        providerModels,
+      };
+      
       const res = await fetch("/api/v1/settings/llm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
+        body: JSON.stringify(saveData),
       });
       if (res.ok) {
         message.success("配置保存成功");
@@ -186,24 +193,85 @@ export default function Settings() {
     }
   };
 
-  const applyVisionPreset = (preset: typeof VISION_PRESETS[0]) => {
-    setSelectedVisionPreset(preset.name);
+  const applyPreset = (preset: typeof PROVIDER_PRESETS[0]) => {
+    const currentProvider = selectedPreset;
+    const currentApiKey = form.getFieldValue("apiKey") || "";
+    const currentModels = form.getFieldValue("selectedModels") || [];
+    
+    // 保存当前供应商的 API Key 和模型
+    const providerApiKeys = form.getFieldValue("providerApiKeys") || {};
+    const providerModels = form.getFieldValue("providerModels") || {};
+    
+    if (currentProvider) {
+      if (currentApiKey) {
+        providerApiKeys[currentProvider] = currentApiKey;
+      }
+      if (currentModels.length > 0) {
+        providerModels[currentProvider] = currentModels;
+      }
+    }
+    
+    setSelectedPreset(preset.name);
+    
+    // 切换供应商时，加载该供应商保存的 API Key 和模型
+    const savedApiKey = providerApiKeys[preset.name] || "";
+    const savedModels = providerModels[preset.name] || [];
+    
     form.setFieldsValue({
-      visionBaseUrl: preset.config.baseUrl,
-      visionModelName: preset.config.modelName,
+      baseUrl: preset.baseUrl,
+      apiKey: savedApiKey,
+      selectedModels: savedModels,
+      providerApiKeys: providerApiKeys,
+      providerModels: providerModels,
     });
+    
+    // 如果有已保存的模型，设置到可用模型列表
+    if (savedModels.length > 0) {
+      setAvailableModels(
+        savedModels.map((m: string) => ({ id: m, name: m, description: "多模态" }))
+      );
+    } else {
+      setAvailableModels([]);
+    }
   };
 
-  const applyDecisionPreset = (preset: typeof DECISION_PRESETS[0]) => {
-    setSelectedDecisionPreset(preset.name);
-    form.setFieldsValue({
-      decisionBaseUrl: preset.config.baseUrl,
-      decisionModelName: preset.config.modelName,
-    });
+  const fetchModels = async () => {
+    const baseUrl = form.getFieldValue("baseUrl");
+    const apiKey = form.getFieldValue("apiKey");
+    
+    if (!baseUrl) {
+      message.error("请先填写 Base URL");
+      return;
+    }
+
+    setFetchingModels(true);
+    try {
+      const res = await fetch("/api/v1/settings/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl, apiKey }),
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.code === 0 && data.data) {
+          setAvailableModels(data.data);
+          message.success(`获取到 ${data.data.length} 个模型`);
+        } else {
+          message.error(data.message || "获取模型列表失败");
+        }
+      } else {
+        message.error("获取模型列表失败");
+      }
+    } catch (error) {
+      message.error("获取模型列表失败: " + error);
+    } finally {
+      setFetchingModels(false);
+    }
   };
 
   const renderPresetCard = (
-    preset: typeof VISION_PRESETS[0],
+    preset: typeof PROVIDER_PRESETS[0],
     isSelected: boolean,
     onClick: () => void
   ) => (
@@ -264,7 +332,7 @@ export default function Settings() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">系统设置</h1>
-              <p className="text-gray-500 text-sm">配置您的 API 设置以开始使用</p>
+              <p className="text-gray-500 text-sm">配置 LLM API 以获取模型列表</p>
             </div>
           </div>
         </div>
@@ -274,39 +342,33 @@ export default function Settings() {
           layout="vertical"
           onFinish={handleSave}
           initialValues={{
-            provider: "openai",
-            model: "gpt-4o",
-            apiKey: "",
             baseUrl: "",
-            agentType: "glm-async",
+            apiKey: "",
+            selectedModels: [],
             defaultMaxSteps: 100,
             layeredMaxTurns: 50,
-            visionBaseUrl: "",
-            visionModelName: "",
-            visionApiKey: "",
-            decisionBaseUrl: "",
-            decisionModelName: "",
-            decisionApiKey: "",
+            providerApiKeys: {},
+            providerModels: {},
           }}
         >
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="shadow-sm border-0 rounded-xl">
+          <div className="max-w-3xl">
+            <Card className="shadow-sm border-0 rounded-xl mb-6">
               <div className="flex items-center gap-2 mb-4">
-                <EyeOutlined className="text-blue-500" />
-                <span className="font-semibold text-gray-900">视觉模型</span>
+                <CloudSyncOutlined className="text-blue-500" />
+                <span className="font-semibold text-gray-900">模型提供商</span>
               </div>
 
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    选择预设配置
+                    选择提供商
                   </label>
-                  <div className="grid grid-cols-1 gap-2">
-                    {VISION_PRESETS.map((preset) =>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {PROVIDER_PRESETS.map((preset) =>
                       renderPresetCard(
                         preset,
-                        selectedVisionPreset === preset.name,
-                        () => applyVisionPreset(preset)
+                        selectedPreset === preset.name,
+                        () => applyPreset(preset)
                       )
                     )}
                   </div>
@@ -321,7 +383,7 @@ export default function Settings() {
                       Base URL <span className="text-red-500">*</span>
                     </span>
                   }
-                  name="visionBaseUrl"
+                  name="baseUrl"
                   rules={[
                     { required: true, message: "请输入 Base URL" },
                     { 
@@ -340,68 +402,59 @@ export default function Settings() {
                       API Key
                     </span>
                   }
-                  name="visionApiKey"
+                  name="apiKey"
                 >
                   <Input.Password
-                    placeholder="Leave empty if not required"
+                    placeholder="sk-..."
                     className="rounded-lg"
                     iconRender={(visible) =>
                       visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
                     }
                     visibilityToggle={{
-                      visible: showVisionApiKey,
-                      onVisibleChange: setShowVisionApiKey,
+                      visible: showApiKey,
+                      onVisibleChange: setShowApiKey,
                     }}
                   />
                 </Form.Item>
 
-                <Form.Item
-                  label={<span className="text-gray-700">模型名称</span>}
-                  name="visionModelName"
-                  rules={[{ required: true, message: "请输入模型名称" }]}
-                >
-                  <Input placeholder="gpt-4o" className="rounded-lg" />
-                </Form.Item>
+                <div className="flex justify-end">
+                  <Button
+                    icon={<CloudSyncOutlined />}
+                    onClick={fetchModels}
+                    loading={fetchingModels}
+                    className="rounded-lg"
+                  >
+                    获取模型列表
+                  </Button>
+                </div>
 
                 <Form.Item
                   label={
                     <span className="flex items-center gap-1 text-gray-700">
-                      <RobotOutlined className="text-gray-400" />
-                      Agent 类型
+                      <ApiOutlined className="text-gray-400" />
+                      选择多模态模型（可多选）
                     </span>
                   }
-                  name="agentType"
+                  name="selectedModels"
                 >
-                  <div className="grid grid-cols-2 gap-2">
-                    {AGENT_TYPES.map((agent) => {
-                      const isSelected = form.getFieldValue("agentType") === agent.name;
-                      return (
-                        <div
-                          key={agent.name}
-                          onClick={() => form.setFieldValue("agentType", agent.name)}
-                          className={`
-                            p-3 rounded-xl cursor-pointer transition-all border-2
-                            ${isSelected
-                              ? "border-blue-500 bg-blue-50"
-                              : "border-gray-200 hover:border-blue-300 bg-white"
-                            }
-                          `}
-                        >
-                          <div className="flex items-center gap-2 mb-1">
-                            <span style={{ color: isSelected ? agent.color : "#9ca3af" }}>
-                              {agent.icon}
-                            </span>
-                            <span className={`font-medium text-sm ${isSelected ? "text-gray-900" : "text-gray-600"}`}>
-                              {agent.displayName}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-500 line-clamp-2">
-                            {agent.description}
-                          </p>
+                  <Select
+                    mode="multiple"
+                    placeholder={fetchingModels ? "获取中..." : availableModels.length === 0 ? "请先点击获取模型列表" : "选择模型"}
+                    loading={fetchingModels}
+                    className="rounded-lg"
+                    disabled={availableModels.length === 0}
+                  >
+                    {availableModels.map((model) => (
+                      <Option key={model.id} value={model.id}>
+                        <div className="flex flex-col">
+                          <span>{model.name}</span>
+                          {model.description && (
+                            <span className="text-xs text-gray-400">{model.description}</span>
+                          )}
                         </div>
-                      );
-                    })}
-                  </div>
+                      </Option>
+                    ))}
+                  </Select>
                 </Form.Item>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -415,118 +468,36 @@ export default function Settings() {
               </div>
             </Card>
 
-            <Card className="shadow-sm border-0 rounded-xl">
-              <div className="flex items-center gap-2 mb-4">
-                <ThunderboltOutlined className="text-indigo-500" />
-                <span className="font-semibold text-gray-900">决策模型</span>
-              </div>
-
-              <div className="space-y-4">
-                <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3">
-                  <div className="flex items-start gap-2">
-                    <InfoCircleOutlined className="text-indigo-500 mt-0.5" />
-                    <div className="text-sm text-indigo-900">
-                      决策模型用于分层代理的规划阶段。如果不配置，将使用视觉模型作为决策模型。
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    选择预设配置
-                  </label>
-                  <div className="grid grid-cols-1 gap-2">
-                    {DECISION_PRESETS.map((preset) =>
-                      renderPresetCard(
-                        preset,
-                        selectedDecisionPreset === preset.name,
-                        () => applyDecisionPreset(preset)
-                      )
-                    )}
-                  </div>
-                </div>
-
-                <Divider className="my-4" />
-
-                <Form.Item
-                  label={
-                    <span className="flex items-center gap-1 text-gray-700">
-                      <GlobalOutlined className="text-gray-400" />
-                      Base URL
-                    </span>
-                  }
-                  name="decisionBaseUrl"
-                  rules={[
-                    { 
-                      pattern: /^https?:\/\/.+|^$/,
-                      message: "URL 必须以 http:// 或 https:// 开头"
-                    }
-                  ]}
-                >
-                  <Input placeholder="https://api.openai.com/v1" className="rounded-lg" />
-                </Form.Item>
-
-                <Form.Item
-                  label={
-                    <span className="flex items-center gap-1 text-gray-700">
-                      <ApiOutlined className="text-gray-400" />
-                      API Key
-                    </span>
-                  }
-                  name="decisionApiKey"
-                >
-                  <Input.Password
-                    placeholder="sk-..."
-                    className="rounded-lg"
-                    iconRender={(visible) =>
-                      visible ? <EyeOutlined /> : <EyeInvisibleOutlined />
-                    }
-                    visibilityToggle={{
-                      visible: showDecisionApiKey,
-                      onVisibleChange: setShowDecisionApiKey,
-                    }}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  label={<span className="text-gray-700">模型名称</span>}
-                  name="decisionModelName"
-                >
-                  <Input placeholder="gpt-4o" className="rounded-lg" />
-                </Form.Item>
-              </div>
-            </Card>
-          </div>
-
-          <div className="mt-6 flex justify-between items-center">
-            <Button
-              onClick={() => {
-                fetchConfig();
-                message.info("已重置为保存的配置");
-              }}
-              className="rounded-lg"
-            >
-              取消
-            </Button>
-            <Space>
+            <div className="flex justify-between items-center">
               <Button
-                icon={<ReloadOutlined />}
-                onClick={handleTest}
-                loading={loading}
+                onClick={() => {
+                  fetchConfig();
+                  message.info("已重置为保存的配置");
+                }}
                 className="rounded-lg"
               >
-                测试连接
+                取消
               </Button>
-              <Button
-                type="primary"
-                htmlType="submit"
-                icon={<SaveOutlined />}
-                loading={loading}
-                className="rounded-lg"
-              >
-                保存配置
-              </Button>
-            </Space>
+              <Space>
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={handleTest}
+                  loading={loading}
+                  className="rounded-lg"
+                >
+                  测试连接
+                </Button>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  icon={<SaveOutlined />}
+                  loading={loading}
+                  className="rounded-lg"
+                >
+                  保存配置
+                </Button>
+              </Space>
+            </div>
           </div>
         </Form>
       </div>

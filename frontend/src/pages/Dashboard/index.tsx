@@ -46,9 +46,6 @@ export default function Dashboard() {
           </Tag>
         </div>
         
-        <h1 className="text-3xl font-display font-bold text-text-primary mb-2">
-          UI Genie
-        </h1>
         
         <h2 className="text-xl text-text-secondary mb-4">
           智能UI执行精灵
