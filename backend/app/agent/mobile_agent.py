@@ -51,6 +51,7 @@ class MobileAgent:
         # 优先使用传入的系统提示词（来自引擎配置），否则使用默认提示词
         from .prompts import SYSTEM_PROMPT
         custom_prompt = model_config.get("system_prompt")
+        logger.info(f"MobileAgent using system prompt: {custom_prompt}")
         self.system_prompt = custom_prompt if custom_prompt else SYSTEM_PROMPT
         logger.info(f"MobileAgent using {'custom' if custom_prompt else 'default'} system prompt")
     

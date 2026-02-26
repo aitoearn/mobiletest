@@ -70,3 +70,8 @@ async def startup_event():
     logging.info(f"Starting {settings.app_name}")
     logging.info(f"Planner mode: {settings.langgraph_planner_mode}")
     logging.info(f"Checkpointer backend: {settings.langgraph_checkpointer_backend}")
+    
+    # 初始化数据库表
+    from app.core.database import init_db
+    await init_db()
+    logging.info("Database initialized")

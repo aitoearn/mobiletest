@@ -77,7 +77,8 @@ AVAILABLE_MODELS = [
 @router.get("", response_model=EnginesResponse)
 async def list_engines(db: Session = Depends(get_db)):
     """获取所有执行引擎，第一个引擎标记为默认"""
-    engines = db.execute(select(Engine).order_by(Engine.created_at)).scalars().all()
+    result = await db.execute(select(Engine).order_by(Engine.created_at))
+    engines = result.scalars().all()
     engines_list = []
     for i, e in enumerate(engines):
         engines_list.append({
@@ -125,8 +126,8 @@ async def create_engine(engine: EngineCreate, db: Session = Depends(get_db)):
     )
     
     db.add(new_engine)
-    db.commit()
-    db.refresh(new_engine)
+    await db.commit()
+    await db.refresh(new_engine)
     
     return EngineResponse(
         code=0,
@@ -148,7 +149,7 @@ async def create_engine(engine: EngineCreate, db: Session = Depends(get_db)):
 @router.get("/{engine_id}", response_model=EngineResponse)
 async def get_engine(engine_id: str, db: Session = Depends(get_db)):
     """获取单个执行引擎"""
-    engine = db.get(Engine, engine_id)
+    engine = await db.get(Engine, engine_id)
     if not engine:
         raise HTTPException(status_code=404, detail="引擎不存在")
     
@@ -172,7 +173,7 @@ async def get_engine(engine_id: str, db: Session = Depends(get_db)):
 @router.put("/{engine_id}", response_model=EngineResponse)
 async def update_engine(engine_id: str, engine_update: EngineUpdate, db: Session = Depends(get_db)):
     """更新执行引擎"""
-    engine = db.get(Engine, engine_id)
+    engine = await db.get(Engine, engine_id)
     if not engine:
         raise HTTPException(status_code=404, detail="引擎不存在")
     
@@ -189,8 +190,8 @@ async def update_engine(engine_id: str, engine_update: EngineUpdate, db: Session
     if engine_update.apiKey is not None:
         engine.api_key = engine_update.apiKey
     
-    db.commit()
-    db.refresh(engine)
+    await db.commit()
+    await db.refresh(engine)
     
     return EngineResponse(
         code=0,
@@ -212,11 +213,11 @@ async def update_engine(engine_id: str, engine_update: EngineUpdate, db: Session
 @router.delete("/{engine_id}")
 async def delete_engine(engine_id: str, db: Session = Depends(get_db)):
     """删除执行引擎"""
-    engine = db.get(Engine, engine_id)
+    engine = await db.get(Engine, engine_id)
     if not engine:
         raise HTTPException(status_code=404, detail="引擎不存在")
     
     db.delete(engine)
-    db.commit()
+    await db.commit()
     
     return {"code": 0, "message": "删除成功"}

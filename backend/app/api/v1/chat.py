@@ -67,17 +67,26 @@ def _load_config() -> dict:
 
 def _get_model_config(engine: Optional[Engine] = None):
     """获取模型配置，优先使用引擎配置"""
+    # 加载系统设置
+    config = _load_config()
+    provider_api_keys = config.get("providerApiKeys", {})
+    
     if engine:
-        # 使用引擎配置
+        # 使用引擎配置，API Key 从系统设置中获取
+        provider = engine.provider or ""
+        api_key = provider_api_keys.get(provider, "") if provider else config.get("apiKey", "")
+        
+        print(f"[ChatAPI] Engine config: provider={provider}, model={engine.model}, base_url={engine.base_url}")
+        print(f"[ChatAPI] API Key found: {bool(api_key)}")
+        
         return {
             "base_url": engine.base_url or "https://open.bigmodel.cn/api/paas/v4",
-            "api_key": engine.api_key or "",
+            "api_key": api_key,
             "model": engine.model or "autoglm-phone",
             "system_prompt": engine.prompt,  # 引擎的提示词作为系统提示词
         }
     
     # 使用默认配置
-    config = _load_config()
     return {
         "base_url": config.get("baseUrl") or "https://open.bigmodel.cn/api/paas/v4",
         "api_key": config.get("apiKey") or "",
@@ -111,7 +120,7 @@ async def chat_stream(request: ChatAPIRequest, db: Session = Depends(get_db)):
     # 加载引擎配置
     engine = None
     if request.engine_id:
-        engine = db.get(Engine, request.engine_id)
+        engine = await db.get(Engine, request.engine_id)
         if engine:
             print(f"[ChatAPI] Using engine: {engine.name} (model: {engine.model})")
         else:

@@ -69,7 +69,11 @@ export default function Engines() {
       const res = await fetch("/api/v1/engines");
       if (res.ok) {
         const data = await res.json();
+        console.log("Fetched engines:", data);
         setEngines(data.data || []);
+      } else {
+        console.error("Failed to fetch engines:", res.status);
+        message.error("获取引擎列表失败");
       }
     } catch (error) {
       console.error("Failed to fetch engines:", error);
@@ -174,11 +178,14 @@ export default function Engines() {
       });
 
       if (res.ok) {
+        const result = await res.json();
+        console.log("Save engine result:", result);
         message.success(editingEngine ? "更新成功" : "创建成功");
         setModalVisible(false);
         fetchEngines();
       } else {
         const error = await res.json();
+        console.error("Save engine failed:", error);
         message.error(error.message || "保存失败");
       }
     } catch (error) {
