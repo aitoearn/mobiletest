@@ -1,18 +1,25 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Button, Space, Tag, Spin, message, Select } from "antd";
-import { ArrowLeftOutlined, HistoryOutlined, ClearOutlined, ThunderboltOutlined, RobotOutlined } from "@ant-design/icons";
+import { Button, Space, Tag, Spin, message, Select, Drawer, Input, Card, List } from "antd";
+import { ArrowLeftOutlined, ClearOutlined, ThunderboltOutlined, RobotOutlined, BarChartOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { ScrcpyPlayer } from "@/components/ScrcpyPlayer";
 import { MessageList, ChatInput } from "@/components/chat";
 import { useChatStream } from "@/hooks/useChatStream";
-import type { Device } from "@/types";
+import type { Device, Message } from "@/types";
 
 const { Option } = Select;
+const { TextArea } = Input;
 
 interface Engine {
   id: string;
   name: string;
   model: string;
+  prompt?: string;
+}
+
+interface AnalysisRule {
+  id: string;
+  content: string;
 }
 
 export default function Test() {
@@ -23,10 +30,16 @@ export default function Test() {
   const [inputValue, setInputValue] = useState("");
   const [engines, setEngines] = useState<Engine[]>([]);
   const [selectedEngineId, setSelectedEngineId] = useState<string>("");
+  
+  // 后置分析侧边栏状态
+  const [analysisDrawerOpen, setAnalysisDrawerOpen] = useState(false);
+  const [analysisRules, setAnalysisRules] = useState<AnalysisRule[]>([]);
+  const [newRule, setNewRule] = useState("");
+  const [currentMessage, setCurrentMessage] = useState<Message | null>(null);
 
   const { messages, sending, sendMessage, abort, clear } = useChatStream({
     deviceId,
-    engineId: selectedEngineId || undefined,  // 传递选中的引擎ID
+    engineId: selectedEngineId || undefined,
     onError: (error) => message.error(`错误: ${error}`),
   });
 
@@ -84,6 +97,73 @@ export default function Test() {
     message.info("对话已清空");
   };
 
+  // 保存指令到用例管理
+  const handleSaveInstruction = async (msg: Message) => {
+    const engine = engines.find(e => e.id === selectedEngineId);
+    if (!engine) {
+      message.error("未找到执行引擎信息");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/v1/cases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: msg.content.slice(0, 50) + (msg.content.length > 50 ? "..." : ""),
+          description: msg.content,
+          steps: msg.steps?.map((step, idx) => ({
+            step_number: idx + 1,
+            action: step.toolName || "execute",
+            target: step.content,
+            params: step.toolArgs,
+          })),
+          engine_id: selectedEngineId,
+          engine_name: engine.name,
+          engine_model: engine.model,
+          engine_prompt: engine.prompt,
+        }),
+      });
+
+      if (res.ok) {
+        message.success("指令已保存到用例管理");
+      } else {
+        message.error("保存失败");
+      }
+    } catch (error) {
+      console.error("保存指令失败:", error);
+      message.error("保存失败");
+    }
+  };
+
+  // 打开后置分析侧边栏
+  const handleAddAnalysis = (msg: Message) => {
+    setCurrentMessage(msg);
+    setAnalysisDrawerOpen(true);
+  };
+
+  // 添加分析规则
+  const handleAddRule = () => {
+    if (!newRule.trim()) return;
+    setAnalysisRules([...analysisRules, { id: Date.now().toString(), content: newRule }]);
+    setNewRule("");
+  };
+
+  // 删除分析规则
+  const handleDeleteRule = (id: string) => {
+    setAnalysisRules(analysisRules.filter(r => r.id !== id));
+  };
+
+  // 执行分析
+  const handleExecuteAnalysis = async () => {
+    if (analysisRules.length === 0) {
+      message.warning("请先添加分析规则");
+      return;
+    }
+
+    message.info("分析功能开发中...");
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -112,7 +192,6 @@ export default function Test() {
           </div>
         </Space>
         <Space>
-          <Button icon={<HistoryOutlined />}>执行历史</Button>
           <Button icon={<ClearOutlined />} onClick={handleClear}>
             清空对话
           </Button>
@@ -180,7 +259,11 @@ export default function Test() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-6 py-4">
-            <MessageList messages={messages} />
+            <MessageList 
+              messages={messages} 
+              onSaveInstruction={handleSaveInstruction}
+              onAddAnalysis={handleAddAnalysis}
+            />
           </div>
 
           <div className="border-t p-4 bg-gray-50">
@@ -196,6 +279,90 @@ export default function Test() {
           </div>
         </div>
       </div>
+
+      {/* 后置分析侧边栏 */}
+      <Drawer
+        title="后置分析"
+        placement="right"
+        width={480}
+        onClose={() => setAnalysisDrawerOpen(false)}
+        open={analysisDrawerOpen}
+      >
+        <div className="space-y-6">
+          {/* 结果分析助手 */}
+          <Card title="结果分析助手" className="border-0 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <BarChartOutlined className="text-blue-500" />
+              <span className="font-medium">基础断言助手</span>
+              <Tag color="blue">v2</Tag>
+            </div>
+            <div className="text-sm text-gray-500 mb-2">
+              模型: {engines.find(e => e.id === selectedEngineId)?.model || "-"}
+            </div>
+          </Card>
+
+          {/* 分析规则 */}
+          <Card 
+            title={`分析规则 (${analysisRules.length}条)`} 
+            className="border-0 shadow-sm"
+          >
+            <div className="space-y-3">
+              {analysisRules.map((rule, index) => (
+                <div key={rule.id} className="flex items-start gap-2">
+                  <span className="text-gray-400 text-sm mt-1">{index + 1}.</span>
+                  <div className="flex-1 bg-gray-50 rounded-lg p-2 text-sm">
+                    {rule.content}
+                  </div>
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() => handleDeleteRule(rule.id)}
+                  />
+                </div>
+              ))}
+              
+              <div className="flex gap-2">
+                <TextArea
+                  placeholder="输入分析规则，如：页面成功跳转到..."
+                  value={newRule}
+                  onChange={(e) => setNewRule(e.target.value)}
+                  rows={2}
+                  className="flex-1"
+                />
+              </div>
+              <Button
+                type="dashed"
+                block
+                icon={<PlusOutlined />}
+                onClick={handleAddRule}
+                disabled={!newRule.trim()}
+              >
+                添加规则
+              </Button>
+            </div>
+          </Card>
+
+          {/* 执行分析按钮 */}
+          <Button
+            type="primary"
+            block
+            size="large"
+            icon={<BarChartOutlined />}
+            onClick={handleExecuteAnalysis}
+            disabled={analysisRules.length === 0}
+          >
+            执行分析
+          </Button>
+          
+          {analysisRules.length === 0 && (
+            <p className="text-xs text-gray-400 text-center">
+              请先保存驱动指令后再保存分析规则
+            </p>
+          )}
+        </div>
+      </Drawer>
     </div>
   );
 }

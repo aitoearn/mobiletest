@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Tag } from "antd";
+import { Tag, Image, Button } from "antd";
 import {
   UserOutlined,
   RobotOutlined,
@@ -10,11 +10,18 @@ import {
   ToolOutlined,
   RightOutlined,
   DownOutlined,
+  BulbOutlined,
+  ApiOutlined,
+  CameraOutlined,
+  SaveOutlined,
+  BarChartOutlined,
 } from "@ant-design/icons";
 import type { Message, ExecutionStep } from "@/types";
 
 interface MessageListProps {
   messages: Message[];
+  onSaveInstruction?: (message: Message) => void;
+  onAddAnalysis?: (message: Message) => void;
 }
 
 const roleConfig = {
@@ -44,62 +51,33 @@ interface StepItemProps {
   messageId: string;
 }
 
+// 新版本的步骤展示组件 - 参考图片样式
 function StepItem({ step, index }: StepItemProps) {
   const [expanded, setExpanded] = useState(true);
 
-  const getStepStyle = () => {
-    switch (step.type) {
-      case "tool_call":
-        return {
-          icon: <ToolOutlined className="text-blue-500" />,
-          iconBg: "bg-blue-100",
-          label: `步骤 ${index + 1}: ${step.content || "调用工具"}`,
-          labelColor: "text-blue-600",
-        };
-      case "tool_result":
-        return {
-          icon: <CheckCircleOutlined className="text-green-500" />,
-          iconBg: "bg-green-100",
-          label: `步骤 ${index + 1}: 执行结果`,
-          labelColor: "text-green-600",
-        };
-      case "thinking":
-        return {
-          icon: <LoadingOutlined spin className="text-orange-500" />,
-          iconBg: "bg-orange-100",
-          label: `步骤 ${index + 1}: 思考中...`,
-          labelColor: "text-orange-600",
-        };
-      default:
-        return {
-          icon: <RightOutlined className="text-gray-500" />,
-          iconBg: "bg-gray-100",
-          label: `步骤 ${index + 1}: ${step.content}`,
-          labelColor: "text-gray-600",
-        };
-    }
-  };
-
-  const style = getStepStyle();
+  // 解析步骤数据
+  const thinking = step.content || "";
+  const action = step.toolName || "";
+  const actionParams = step.toolArgs || {};
+  const screenshot = step.screenshot || "";
 
   return (
-    <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-3">
+      {/* 步骤头部 */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-3 hover:bg-gray-100 transition-colors"
+        className="w-full flex items-center justify-between p-3 hover:bg-gray-50 transition-colors border-b border-gray-100"
       >
         <div className="flex items-center gap-2">
-          <div className={`flex h-6 w-6 items-center justify-center rounded-full ${style.iconBg}`}>
-            {style.icon}
+          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-green-100">
+            <CheckCircleOutlined className="text-green-500 text-sm" />
           </div>
-          <span className={`text-sm font-medium ${style.labelColor}`}>
-            {style.label}
+          <span className="text-sm font-medium text-gray-700">
+            Step {index + 1}
           </span>
-          {step.toolName && (
-            <Tag color="blue" className="ml-2 text-xs">
-              {step.toolName}
-            </Tag>
-          )}
+          <span className="text-xs text-gray-400">
+            {step.timestamp ? new Date(step.timestamp).toLocaleTimeString() : ""}
+          </span>
         </div>
         {expanded ? (
           <DownOutlined className="text-gray-400 text-xs" />
@@ -109,49 +87,111 @@ function StepItem({ step, index }: StepItemProps) {
       </button>
 
       {expanded && (
-        <div className="px-3 pb-3 space-y-2">
-          {step.type === "tool_call" && step.toolArgs && (
-            <div className="bg-white rounded-lg p-3 text-sm border border-gray-100">
-              <p className="text-xs text-gray-500 mb-1 font-medium">
-                工具参数:
-              </p>
-              <pre className="text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap">
-                {typeof step.toolArgs === "string"
-                  ? step.toolArgs
-                  : JSON.stringify(step.toolArgs, null, 2)}
-              </pre>
+        <div className="p-4">
+          <div className="flex gap-4">
+            {/* 左侧内容区域 */}
+            <div className="flex-1 space-y-3">
+              {/* 思考过程 */}
+              {thinking && (
+                <div className="bg-amber-50 rounded-lg p-3 border border-amber-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <BulbOutlined className="text-amber-500" />
+                    <span className="text-sm font-medium text-amber-700">思考过程</span>
+                  </div>
+                  <p className="text-sm text-amber-800 whitespace-pre-wrap">{thinking}</p>
+                </div>
+              )}
+
+              {/* 执行动作 */}
+              {action && (
+                <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
+                  <div className="flex items-center gap-2 mb-2">
+                    <ApiOutlined className="text-blue-500" />
+                    <span className="text-sm font-medium text-blue-700">执行动作</span>
+                  </div>
+                  <div className="bg-white rounded-md p-2 border border-blue-200">
+                    <code className="text-sm text-blue-800 font-mono">
+                      {action}({Object.entries(actionParams).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')})
+                    </code>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-          {step.type === "tool_result" && step.toolResult && (
-            <div className="bg-white rounded-lg p-3 text-sm border border-gray-100">
-              <p className="text-xs text-gray-500 mb-1 font-medium">
-                执行结果:
-              </p>
-              <pre className="text-xs text-gray-600 overflow-x-auto whitespace-pre-wrap max-h-40 overflow-y-auto">
-                {typeof step.toolResult === "string"
-                  ? step.toolResult
-                  : JSON.stringify(step.toolResult, null, 2)}
-              </pre>
-            </div>
-          )}
+
+            {/* 右侧截图区域 */}
+            {screenshot && (
+              <div className="w-48 flex-shrink-0">
+                <div className="flex items-center gap-2 mb-2">
+                  <CameraOutlined className="text-gray-500" />
+                  <span className="text-sm font-medium text-gray-600">屏幕快照</span>
+                </div>
+                <Image
+                  src={screenshot.startsWith('data:') ? screenshot : `data:image/png;base64,${screenshot}`}
+                  alt="截图"
+                  className="rounded-lg border border-gray-200"
+                  style={{ maxWidth: '100%', maxHeight: '200px' }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-export function MessageList({ messages }: MessageListProps) {
+// 执行完成后的操作按钮组件
+function CompletionActions({ message, onSave, onAnalyze }: { 
+  message: Message; 
+  onSave?: (msg: Message) => void;
+  onAnalyze?: (msg: Message) => void;
+}) {
+  return (
+    <div className="bg-blue-50 rounded-xl p-4 border border-blue-100 mt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <ThunderboltOutlined className="text-blue-500" />
+        <span className="text-sm text-blue-600">探索模式：任务完成后可直接保存驱动指令</span>
+      </div>
+      <div className="flex gap-3">
+        <Button
+          type="primary"
+          danger
+          icon={<SaveOutlined />}
+          onClick={() => onSave?.(message)}
+          className="rounded-lg"
+        >
+          保存驱动指令
+        </Button>
+        <Button
+          icon={<BarChartOutlined />}
+          onClick={() => onAnalyze?.(message)}
+          className="rounded-lg"
+        >
+          添加后置分析
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function MessageList({ messages, onSaveInstruction, onAddAnalysis }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // 判断消息是否已完成（有步骤且不在流式状态）
+  const isMessageComplete = (msg: Message) => {
+    return msg.steps && msg.steps.length > 0 && !msg.isStreaming;
+  };
+
   return (
     <div className="space-y-4">
       {messages.map((msg) => {
         const config = roleConfig[msg.role];
         const isLastMessage = msg.id === messages[messages.length - 1]?.id;
+        const showActions = isLastMessage && isMessageComplete(msg);
 
         return (
           <div key={msg.id} className={`flex ${config.align}`}>
@@ -165,7 +205,7 @@ export function MessageList({ messages }: MessageListProps) {
                 </p>
               </div>
             ) : (
-              <div className="max-w-[85%] space-y-3">
+              <div className="max-w-[90%] w-full space-y-3">
                 {msg.steps && msg.steps.length > 0 && (
                   <div className="space-y-2">
                     {msg.steps.map((step, idx) => (
@@ -205,6 +245,15 @@ export function MessageList({ messages }: MessageListProps) {
                     <LoadingOutlined spin />
                     <span>正在思考和执行...</span>
                   </div>
+                )}
+
+                {/* 执行完成后的操作按钮 */}
+                {showActions && (
+                  <CompletionActions
+                    message={msg}
+                    onSave={onSaveInstruction}
+                    onAnalyze={onAddAnalysis}
+                  />
                 )}
 
                 <p className="text-xs text-gray-400">

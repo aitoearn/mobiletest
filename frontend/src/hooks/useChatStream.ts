@@ -82,6 +82,8 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
       let buffer = "";
       const steps: ExecutionStep[] = [];
       let fullContent = "";
+      let currentThinking = ""; // 当前思考内容
+      let currentScreenshot = ""; // 当前截图
 
       while (true) {
         const { done, value } = await reader.read();
@@ -99,8 +101,9 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
               if (data.type === "start") {
                 // Stream started
               } else if (data.type === "thinking") {
-                // 显示思考内容
-                const thinkingContent = data.content || "";
+                // 收集思考内容
+                const thinkingContent = data.content || data.data?.content || "";
+                currentThinking += thinkingContent;
                 fullContent += thinkingContent;
                 setStreamingContent(fullContent);
                 setMessages((prev) =>
@@ -126,15 +129,20 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
                 const toolName = data.tool_name || data.data?.tool_name || "";
                 const toolArgs = data.tool_args || data.data?.tool_args || {};
                 
+                // 创建步骤，包含之前的思考内容
                 const step: ExecutionStep = {
                   id: `step-${Date.now()}-${Math.random()}`,
                   type: "tool_call",
-                  content: _getToolCallDescription(toolName, toolArgs),
+                  content: currentThinking || _getToolCallDescription(toolName, toolArgs),
                   toolName,
                   toolArgs,
                   timestamp: new Date(),
                 };
                 steps.push(step);
+                
+                // 重置思考内容
+                currentThinking = "";
+                
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === agentMessageId
@@ -142,19 +150,33 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
                       : msg
                   )
                 );
-              } else if (data.type === "tool_result") {
-                const toolName = data.tool_name || data.data?.tool_name || "";
+              } else if (data.type === "tool_result" || data.type === "step") {
+                // tool_result 或 step 类型都处理为步骤结果
+                const toolName = data.tool_name || (data.action as Record<string, string>)?.action || data.data?.tool_name || "";
                 const result = data.result || data.data?.result || "";
+                const thinking = data.thinking || currentThinking || "";
+                // 提取截图
+                const screenshot = data.screenshot || data.data?.screenshot || "";
                 
                 const step: ExecutionStep = {
                   id: `step-${Date.now()}-${Math.random()}`,
                   type: "tool_result",
-                  content: `${toolName} 执行结果`,
+                  content: thinking || `${toolName} 执行结果`,
                   toolName,
                   toolResult: result,
                   timestamp: new Date(),
                 };
+                
+                // 如果有截图，保存到步骤中
+                if (screenshot) {
+                  step.screenshot = screenshot.startsWith("data:") ? screenshot : `data:image/png;base64,${screenshot}`;
+                }
+                
                 steps.push(step);
+                
+                // 重置思考内容
+                currentThinking = "";
+                
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === agentMessageId

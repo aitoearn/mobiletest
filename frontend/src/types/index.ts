@@ -5,6 +5,7 @@ export interface ExecutionStep {
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   toolResult?: string;
+  screenshot?: string; // 截图数据
   timestamp: Date;
   isExpanded?: boolean;
 }
@@ -44,6 +45,7 @@ export interface SSEEvent {
   success?: boolean;
   finished?: boolean;
   message?: string;
+  screenshot?: string; // 截图数据
   data?: {
     node?: string;
     tool_name?: string;
@@ -52,5 +54,6 @@ export interface SSEEvent {
     error?: string;
     message?: string;
     content?: string;
+    screenshot?: string; // 截图数据
   };
 }

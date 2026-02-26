@@ -36,11 +36,19 @@ class MobileAgent:
         
         logger.info(f"MobileAgent init with config: base_url={model_config.get('base_url')}, model={model_config.get('model')}, api_key={model_config.get('api_key', '')[:10]}...")
         
+        # 打印完整配置用于调试
+        print(f"[MobileAgent] Full config: {model_config}")
+        
         from openai import AsyncOpenAI
+        import httpx
+        base_url = model_config.get("base_url", "https://open.bigmodel.cn/api/paas/v4")
+        print(f"[MobileAgent] Using base_url: {base_url}")
+        
         self.client = AsyncOpenAI(
-            base_url=model_config.get("base_url", "https://open.bigmodel.cn/api/paas/v4"),
+            base_url=base_url,
             api_key=model_config.get("api_key"),
             timeout=120,
+            http_client=httpx.AsyncClient(proxy=None),
         )
         
         self._step_count = 0
@@ -194,6 +202,12 @@ class MobileAgent:
         
         finished = action.get("_metadata") == "finish" or result.get("should_finish", False)
         
+        # 执行动作后再次截图，获取执行后的屏幕状态
+        try:
+            final_screenshot = await self.device.screenshot_base64(device_id)
+        except Exception:
+            final_screenshot = screenshot  # 如果失败，使用之前的截图
+        
         # 更新上下文：将上一条用户消息中的图片移除，只保留文本，减少token消耗
         if len(self._context) >= 2 and self._context[-1].get("role") == "user":
             last_user_msg = self._context[-1]
@@ -220,7 +234,8 @@ class MobileAgent:
             "action": action,
             "success": result.get("success", False),
             "finished": finished,
-            "message": result.get("message", "")
+            "message": result.get("message", ""),
+            "screenshot": final_screenshot  # 添加截图
         }}
     
     async def _stream_llm(self, messages: list[dict]) -> AsyncIterator[dict[str, str]]:

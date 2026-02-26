@@ -163,7 +163,7 @@ async def chat_stream(request: ChatAPIRequest, db: Session = Depends(get_db)):
                 elif event_type == "step":
                     step_data = event_data
                     print(f"[ChatAPI] Step: {step_data.get('step')}, action: {step_data.get('action')}")
-                    yield f"data: {json.dumps({'type': 'step', 'step': step_data.get('step'), 'thinking': step_data.get('thinking'), 'action': step_data.get('action'), 'success': step_data.get('success'), 'finished': step_data.get('finished'), 'message': step_data.get('message')})}\n\n"
+                    yield f"data: {json.dumps({'type': 'step', 'step': step_data.get('step'), 'thinking': step_data.get('thinking'), 'action': step_data.get('action'), 'success': step_data.get('success'), 'finished': step_data.get('finished'), 'message': step_data.get('message'), 'screenshot': step_data.get('screenshot')})}\n\n"
                     
                     if step_data.get("finished"):
                         yield f"data: {json.dumps({'type': 'done', 'content': step_data.get('message', '任务完成')})}\n\n"
