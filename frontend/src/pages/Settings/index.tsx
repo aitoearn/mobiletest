@@ -138,23 +138,24 @@ export default function Settings() {
   const handleSave = async (values: LLMConfig) => {
     setLoading(true);
     try {
-      // 保存当前供应商的 API Key 和模型到对应的对象中
-      const providerApiKeys = values.providerApiKeys || {};
-      const providerModels = values.providerModels || {};
+      // 从表单获取当前已保存的 providerApiKeys 和 providerModels（包含其他供应商的数据）
+      const currentProviderApiKeys = form.getFieldValue("providerApiKeys") || {};
+      const currentProviderModels = form.getFieldValue("providerModels") || {};
       
+      // 保存当前供应商的 API Key 和模型
       if (selectedPreset) {
         if (values.apiKey) {
-          providerApiKeys[selectedPreset] = values.apiKey;
+          currentProviderApiKeys[selectedPreset] = values.apiKey;
         }
         if (values.selectedModels) {
-          providerModels[selectedPreset] = values.selectedModels;
+          currentProviderModels[selectedPreset] = values.selectedModels;
         }
       }
       
       const saveData = {
         ...values,
-        providerApiKeys,
-        providerModels,
+        providerApiKeys: currentProviderApiKeys,
+        providerModels: currentProviderModels,
       };
       
       const res = await fetch("/api/v1/settings/llm", {

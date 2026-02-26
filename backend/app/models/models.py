@@ -144,6 +144,7 @@ class Engine(Base):
     name = Column(String(100), nullable=False)
     model = Column(String(100), nullable=False)
     prompt = Column(Text, nullable=False)
+    provider = Column(String(50), default="")  # 供应商名称
     base_url = Column(String(500), default="")
     api_key = Column(String(500), default="")
     created_at = Column(DateTime, default=datetime.utcnow)

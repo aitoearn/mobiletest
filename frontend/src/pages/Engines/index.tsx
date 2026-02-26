@@ -12,6 +12,7 @@ import {
   Typography,
   Popconfirm,
   Tag,
+  Cascader,
 } from "antd";
 import {
   PlusOutlined,
@@ -19,35 +20,40 @@ import {
   DeleteOutlined,
   RobotOutlined,
   ApiOutlined,
-  KeyOutlined,
   SaveOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
 
 const { TextArea } = Input;
 const { Title, Text } = Typography;
-const { Option } = Select;
+
+// 供应商配置（与 Settings 页面保持一致）
+const PROVIDER_PRESETS = [
+  { name: "bigmodel", displayName: "智谱 BigModel", baseUrl: "https://open.bigmodel.cn/api/paas/v4" },
+  { name: "qwen", displayName: "阿里通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+  { name: "modelscope", displayName: "阿里云魔搭社区", baseUrl: "https://api-inference.modelscope.cn/v1" },
+  { name: "custom", displayName: "自建服务", baseUrl: "http://localhost:11434/v1" },
+];
 
 interface Engine {
   id: string;
   name: string;
   model: string;
   prompt: string;
-  baseUrl: string;
-  apiKey: string;
+  provider: string;  // 供应商名称
   createdAt: string;
   updatedAt: string;
 }
 
-interface ModelOption {
-  value: string;
-  label: string;
-  baseUrl: string;
+interface ProviderModels {
+  provider: string;
+  providerName: string;
+  models: string[];
 }
 
 export default function Engines() {
   const [engines, setEngines] = useState<Engine[]>([]);
-  const [models, setModels] = useState<ModelOption[]>([]);
+  const [providerModels, setProviderModels] = useState<ProviderModels[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingEngine, setEditingEngine] = useState<Engine | null>(null);
@@ -55,7 +61,7 @@ export default function Engines() {
 
   useEffect(() => {
     fetchEngines();
-    fetchModels();
+    fetchProviderModels();
   }, []);
 
   const fetchEngines = async () => {
@@ -71,24 +77,41 @@ export default function Engines() {
     }
   };
 
-  const fetchModels = async () => {
+  const fetchProviderModels = async () => {
     try {
-      const res = await fetch("/api/v1/engines/models");
+      const res = await fetch("/api/v1/settings/llm");
       if (res.ok) {
         const data = await res.json();
-        setModels(data.data || []);
+        const providerApiKeys = data.providerApiKeys || {};
+        const providerModels = data.providerModels || {};
+        
+        // 构建供应商-模型列表
+        const providers: ProviderModels[] = [];
+        
+        for (const preset of PROVIDER_PRESETS) {
+          const hasApiKey = providerApiKeys[preset.name];
+          const models = providerModels[preset.name] || [];
+          
+          // 显示有配置 API Key 的供应商（不管有没有选模型）
+          if (hasApiKey) {
+            providers.push({
+              provider: preset.name,
+              providerName: preset.displayName,
+              models: models.length > 0 ? models : [],  // 如果没有选模型，显示空列表
+            });
+          }
+        }
+        
+        setProviderModels(providers);
+        
+        // 调试信息
+        console.log("Provider API Keys:", providerApiKeys);
+        console.log("Provider Models:", providerModels);
+        console.log("Available Providers:", providers);
       }
     } catch (error) {
-      console.error("Failed to fetch models:", error);
-      // 使用默认模型列表
-      setModels([
-        { value: "autoglm-phone", label: "AutoGLM Phone", baseUrl: "" },
-        { value: "gpt-4o", label: "GPT-4o", baseUrl: "" },
-        { value: "gpt-4o-mini", label: "GPT-4o Mini", baseUrl: "" },
-        { value: "glm-4-plus", label: "GLM-4 Plus", baseUrl: "" },
-        { value: "qwen-max", label: "Qwen Max", baseUrl: "" },
-        { value: "qwen-vl-max", label: "Qwen VL Max", baseUrl: "" },
-      ]);
+      console.error("Failed to fetch provider models:", error);
+      message.error("获取供应商模型列表失败");
     }
   };
 
@@ -102,10 +125,8 @@ export default function Engines() {
     setEditingEngine(record);
     form.setFieldsValue({
       name: record.name,
-      model: record.model,
+      model: [record.provider, record.model],  // Cascader 需要数组格式
       prompt: record.prompt,
-      baseUrl: record.baseUrl,
-      apiKey: record.apiKey,
     });
     setModalVisible(true);
   };
@@ -134,10 +155,22 @@ export default function Engines() {
         : "/api/v1/engines";
       const method = editingEngine ? "PUT" : "POST";
 
+      // 从 Cascader 值中解析供应商和模型
+      const [provider, model] = values.model;
+      const providerPreset = PROVIDER_PRESETS.find(p => p.name === provider);
+      
+      const saveData = {
+        name: values.name,
+        model: model,
+        prompt: values.prompt,
+        provider: provider,
+        baseUrl: providerPreset?.baseUrl || "",
+      };
+
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
+        body: JSON.stringify(saveData),
       });
 
       if (res.ok) {
@@ -152,13 +185,6 @@ export default function Engines() {
       message.error("保存失败: " + error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleModelChange = (value: string) => {
-    const selectedModel = models.find((m) => m.value === value);
-    if (selectedModel && selectedModel.baseUrl) {
-      form.setFieldsValue({ baseUrl: selectedModel.baseUrl });
     }
   };
 
@@ -181,15 +207,13 @@ export default function Engines() {
       render: (text: string) => <Tag color="blue">{text}</Tag>,
     },
     {
-      title: "Base URL",
-      dataIndex: "baseUrl",
-      key: "baseUrl",
-      ellipsis: true,
-      render: (text: string) => (
-        <Text type="secondary" className="text-xs">
-          {text || "-"}
-        </Text>
-      ),
+      title: "供应商",
+      dataIndex: "provider",
+      key: "provider",
+      render: (text: string) => {
+        const preset = PROVIDER_PRESETS.find(p => p.name === text);
+        return <Tag color="purple">{preset?.displayName || text}</Tag>;
+      },
     },
     {
       title: "提示词",
@@ -310,47 +334,20 @@ export default function Engines() {
             }
             name="model"
             rules={[{ required: true, message: "请选择模型" }]}
+            help={providerModels.length === 0 ? "请先在系统设置中配置供应商和模型" : ""}
           >
-            <Select
-              placeholder="选择模型"
-              className="rounded-lg"
-              onChange={handleModelChange}
-            >
-              {models.map((model) => (
-                <Option key={model.value} value={model.value}>
-                  {model.label}
-                </Option>
-              ))}
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            label={
-              <Space>
-                <ApiOutlined className="text-gray-400" />
-                <span>Base URL</span>
-              </Space>
-            }
-            name="baseUrl"
-          >
-            <Input
-              placeholder="https://api.openai.com/v1"
-              className="rounded-lg"
-            />
-          </Form.Item>
-
-          <Form.Item
-            label={
-              <Space>
-                <KeyOutlined className="text-gray-400" />
-                <span>API Key</span>
-              </Space>
-            }
-            name="apiKey"
-          >
-            <Input.Password
-              placeholder="sk-..."
-              className="rounded-lg"
+            <Cascader
+              placeholder="选择供应商和模型"
+              className="w-full"
+              options={providerModels.map(pm => ({
+                value: pm.provider,
+                label: pm.providerName,
+                children: pm.models.map(m => ({
+                  value: m,
+                  label: m,
+                })),
+              }))}
+              disabled={providerModels.length === 0}
             />
           </Form.Item>
 

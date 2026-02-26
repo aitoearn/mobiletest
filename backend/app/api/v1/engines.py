@@ -16,6 +16,7 @@ class EngineCreate(BaseModel):
     name: str
     model: str
     prompt: str
+    provider: Optional[str] = ""  # 供应商名称
     baseUrl: Optional[str] = ""
     apiKey: Optional[str] = ""
 
@@ -24,6 +25,7 @@ class EngineUpdate(BaseModel):
     name: Optional[str] = None
     model: Optional[str] = None
     prompt: Optional[str] = None
+    provider: Optional[str] = None  # 供应商名称
     baseUrl: Optional[str] = None
     apiKey: Optional[str] = None
 
@@ -33,6 +35,7 @@ class EngineSchema(BaseModel):
     name: str
     model: str
     prompt: str
+    provider: str  # 供应商名称
     baseUrl: str
     apiKey: str
     createdAt: str
@@ -82,6 +85,7 @@ async def list_engines(db: Session = Depends(get_db)):
             "name": e.name,
             "model": e.model,
             "prompt": e.prompt,
+            "provider": e.provider or "",
             "baseUrl": e.base_url,
             "apiKey": e.api_key,
             "createdAt": e.created_at.isoformat() if e.created_at else "",
@@ -115,6 +119,7 @@ async def create_engine(engine: EngineCreate, db: Session = Depends(get_db)):
         name=engine.name,
         model=engine.model,
         prompt=engine.prompt,
+        provider=engine.provider or "",
         base_url=engine.baseUrl or "",
         api_key=engine.apiKey or "",
     )
@@ -131,6 +136,7 @@ async def create_engine(engine: EngineCreate, db: Session = Depends(get_db)):
             name=new_engine.name,
             model=new_engine.model,
             prompt=new_engine.prompt,
+            provider=new_engine.provider or "",
             baseUrl=new_engine.base_url,
             apiKey=new_engine.api_key,
             createdAt=new_engine.created_at.isoformat() if new_engine.created_at else "",
@@ -154,6 +160,7 @@ async def get_engine(engine_id: str, db: Session = Depends(get_db)):
             name=engine.name,
             model=engine.model,
             prompt=engine.prompt,
+            provider=engine.provider or "",
             baseUrl=engine.base_url,
             apiKey=engine.api_key,
             createdAt=engine.created_at.isoformat() if engine.created_at else "",
@@ -175,6 +182,8 @@ async def update_engine(engine_id: str, engine_update: EngineUpdate, db: Session
         engine.model = engine_update.model
     if engine_update.prompt is not None:
         engine.prompt = engine_update.prompt
+    if engine_update.provider is not None:
+        engine.provider = engine_update.provider
     if engine_update.baseUrl is not None:
         engine.base_url = engine_update.baseUrl
     if engine_update.apiKey is not None:
@@ -191,6 +200,7 @@ async def update_engine(engine_id: str, engine_update: EngineUpdate, db: Session
             name=engine.name,
             model=engine.model,
             prompt=engine.prompt,
+            provider=engine.provider or "",
             baseUrl=engine.base_url,
             apiKey=engine.api_key,
             createdAt=engine.created_at.isoformat() if engine.created_at else "",
