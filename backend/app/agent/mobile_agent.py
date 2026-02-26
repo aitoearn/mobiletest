@@ -26,7 +26,7 @@ class MobileAgent:
         device_service,
         vision_service,
         max_steps: int = 20,
-        max_context_messages: int = 5,
+        max_context_messages: int = 10,  # 增加上下文消息数量，防止任务描述丢失
     ):
         self.model_config = model_config
         self.device = device_service
@@ -133,6 +133,17 @@ class MobileAgent:
         
         messages = self._get_limited_context()
         
+        # 调试：打印消息结构
+        print(f"[DEBUG] Sending {len(messages)} messages to LLM")
+        for i, msg in enumerate(messages):
+            content_preview = ""
+            if isinstance(msg.get("content"), str):
+                content_preview = msg["content"][:50] + "..." if len(msg["content"]) > 50 else msg["content"]
+            elif isinstance(msg.get("content"), list):
+                content_types = [c.get("type") for c in msg["content"]]
+                content_preview = f"list with types: {content_types}"
+            print(f"[DEBUG] Message {i}: role={msg.get('role')}, content={content_preview}")
+        
         thinking = ""
         raw_content = ""
         
@@ -178,6 +189,21 @@ class MobileAgent:
         result = await self._execute_action(device_id, action)
         
         finished = action.get("_metadata") == "finish" or result.get("should_finish", False)
+        
+        # 更新上下文：将上一条用户消息中的图片移除，只保留文本，减少token消耗
+        if len(self._context) >= 2 and self._context[-1].get("role") == "user":
+            last_user_msg = self._context[-1]
+            if isinstance(last_user_msg.get("content"), list):
+                # 只保留文本部分
+                text_only_content = [
+                    c for c in last_user_msg.get("content", []) 
+                    if c.get("type") == "text"
+                ]
+                if text_only_content:
+                    self._context[-1] = {
+                        "role": "user",
+                        "content": text_only_content
+                    }
         
         self._context.append({
             "role": "assistant",
@@ -641,20 +667,45 @@ class MobileAgent:
             return {"success": False, "message": str(e)}
     
     def _get_limited_context(self) -> list[dict]:
-        if len(self._context) <= self.max_context_messages + 1:
-            return self._remove_old_images(self._context)
+        """限制上下文消息数量，保留最近的消息和初始任务描述，并清理历史图片"""
+        # 先清理所有历史消息中的图片（只保留最后一条用户消息的图片）
+        cleaned_context = self._remove_old_images_from_context()
         
-        system_message = self._context[0]
-        recent_messages = self._context[-(self.max_context_messages):]
+        if len(cleaned_context) <= self.max_context_messages + 1:
+            return cleaned_context
         
-        return self._remove_old_images([system_message] + recent_messages)
+        system_message = cleaned_context[0]
+        # 保留初始任务描述（第一条用户消息），防止任务丢失
+        initial_task_message = cleaned_context[1] if len(cleaned_context) > 1 and cleaned_context[1].get("role") == "user" else None
+        
+        # 计算需要保留的最近消息数量
+        # 如果有初始任务消息，则需要为它留出空间
+        slots_for_recent = self.max_context_messages - 1 if initial_task_message else self.max_context_messages
+        recent_messages = cleaned_context[-(slots_for_recent):]
+        
+        # 构建最终上下文：system + 初始任务 + 最近消息
+        if initial_task_message:
+            return [system_message, initial_task_message] + recent_messages
+        else:
+            return [system_message] + recent_messages
     
-    def _remove_old_images(self, messages: list[dict]) -> list[dict]:
+    def _remove_old_images_from_context(self) -> list[dict]:
+        """清理上下文中的历史图片，只保留最后一条用户消息的图片"""
         result = []
-        for i, msg in enumerate(messages):
+        # 找到最后一条包含图片的用户消息索引
+        last_image_idx = -1
+        for i in range(len(self._context) - 1, -1, -1):
+            msg = self._context[i]
+            if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                if any(c.get("type") == "image_url" for c in msg.get("content", [])):
+                    last_image_idx = i
+                    break
+        
+        for i, msg in enumerate(self._context):
             if msg.get("role") == "user" and isinstance(msg.get("content"), list):
                 has_image = any(c.get("type") == "image_url" for c in msg.get("content", []))
-                if has_image and i < len(messages) - 1:
+                # 如果不是最后一条带图片的消息，则移除图片
+                if has_image and i != last_image_idx:
                     text_parts = [c for c in msg.get("content", []) if c.get("type") == "text"]
                     if text_parts:
                         result.append({"role": msg["role"], "content": text_parts})
