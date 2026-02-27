@@ -71,7 +71,7 @@ class DeviceResponse(DeviceBase):
 class TestCaseBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: Optional[str] = None
-    content: str = Field(..., min_length=1)
+    content: dict
     tags: Optional[List[str]] = []
 
 
@@ -82,7 +82,7 @@ class TestCaseCreate(TestCaseBase):
 class TestCaseUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    content: Optional[str] = None
+    content: Optional[dict] = None
     tags: Optional[List[str]] = None
     status: Optional[CaseStatus] = None
 
@@ -103,8 +103,9 @@ class ExecutionBase(BaseModel):
     device_id: int
 
 
-class ExecutionCreate(ExecutionBase):
-    pass
+class ExecutionCreate(BaseModel):
+    test_case_id: int
+    device_id: str
 
 
 class ExecutionUpdate(BaseModel):

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button, Space, Tag, Spin, message, Select, Drawer, Input, Card, List } from "antd";
 import { ArrowLeftOutlined, ClearOutlined, ThunderboltOutlined, RobotOutlined, BarChartOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
@@ -36,6 +36,7 @@ export default function Test() {
   const [analysisRules, setAnalysisRules] = useState<AnalysisRule[]>([]);
   const [newRule, setNewRule] = useState("");
   const [currentMessage, setCurrentMessage] = useState<Message | null>(null);
+  const lastUserInputRef = useRef<string>("");
 
   const { messages, sending, sendMessage, abort, clear } = useChatStream({
     deviceId,
@@ -89,6 +90,7 @@ export default function Test() {
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
+    lastUserInputRef.current = inputValue;
     sendMessage(inputValue);
     setInputValue("");
   };
@@ -106,23 +108,27 @@ export default function Test() {
       return;
     }
 
+    console.log("Saving instruction:", inputValue);
     try {
       const res = await fetch("/api/v1/cases", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: msg.content.slice(0, 50) + (msg.content.length > 50 ? "..." : ""),
+          name: lastUserInputRef.current.slice(0, 50) + (lastUserInputRef.current.length > 50 ? "..." : ""),
           description: msg.content,
-          steps: msg.steps?.map((step, idx) => ({
-            step_number: idx + 1,
-            action: step.toolName || "execute",
-            target: step.content,
-            params: step.toolArgs,
-          })),
-          engine_id: selectedEngineId,
-          engine_name: engine.name,
-          engine_model: engine.model,
-          engine_prompt: engine.prompt,
+          content: {
+            steps: msg.steps?.map((step, idx) => ({
+              step_number: idx + 1,
+              action: step.toolName || "execute",
+              target: step.content,
+              params: step.toolArgs,
+            })),
+            engine_id: selectedEngineId,
+            engine_name: engine.name,
+            engine_model: engine.model,
+            engine_prompt: engine.prompt,
+          },
+          tags: ["chat", engine.name],
         }),
       });
 

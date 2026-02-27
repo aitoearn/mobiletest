@@ -52,15 +52,26 @@ async def create_execution(
     case = case_result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="测试用例不存在")
-    
-    device_result = await db.execute(select(Device).where(Device.id == execution.device_id))
+
+    # 通过 device_id 字符串查找设备
+    device_result = await db.execute(select(Device).where(Device.device_id == execution.device_id))
     device = device_result.scalar_one_or_none()
     if not device:
-        raise HTTPException(status_code=404, detail="设备不存在")
-    
+        # 如果数据库中没有该设备，创建一个临时设备记录
+        from app.models import DevicePlatform
+        device = Device(
+            device_id=execution.device_id,
+            name=execution.device_id,
+            platform=DevicePlatform.ANDROID,
+            status="online",
+        )
+        db.add(device)
+        await db.commit()
+        await db.refresh(device)
+
     db_execution = TestExecution(
         test_case_id=execution.test_case_id,
-        device_id=execution.device_id,
+        device_id=device.id,
         user_id=user_id,
         status=ExecutionStatus.PENDING,
         started_at=datetime.utcnow(),
