@@ -109,7 +109,8 @@ export default function Cases() {
         message.success('执行创建成功')
         setExecuteModalOpen(false)
         // 跳转到执行详情页或执行列表页
-        window.location.href = `/executions/${data.id}`
+        // 跳转到 Test 页面执行用例
+        window.location.href = `/test/${selectedDeviceId}?caseId=${selectedCaseId}`
       } else {
         const error = await res.json()
         message.error(error.detail || '创建执行失败')

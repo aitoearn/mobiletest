@@ -121,7 +121,7 @@ class ExecutionResponse(ExecutionBase):
     id: int
     user_id: int
     status: ExecutionStatus
-    result: Optional[str] = None
+    result: Optional[Any] = None
     error_message: Optional[str] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None

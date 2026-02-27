@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Space, Tag, Spin, message, Select, Drawer, Input, Card, List } from "antd";
 import { ArrowLeftOutlined, ClearOutlined, ThunderboltOutlined, RobotOutlined, BarChartOutlined, PlusOutlined, DeleteOutlined } from "@ant-design/icons";
 import { ScrcpyPlayer } from "@/components/ScrcpyPlayer";
@@ -22,21 +22,46 @@ interface AnalysisRule {
   content: string;
 }
 
+interface TestCase {
+  id: number;
+  name: string;
+  description: string | null;
+  content: {
+    steps?: Array<{
+      step_number: number;
+      action: string;
+      target: string;
+      params?: Record<string, unknown>;
+    }>;
+    engine_id?: string;
+    engine_name?: string;
+    engine_model?: string;
+    engine_prompt?: string;
+  };
+  tags: string[];
+  status: string;
+}
+
 export default function Test() {
   const { deviceId } = useParams<{ deviceId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const caseId = searchParams.get("caseId");
   const [device, setDevice] = useState<Device | null>(null);
   const [loading, setLoading] = useState(true);
   const [inputValue, setInputValue] = useState("");
   const [engines, setEngines] = useState<Engine[]>([]);
   const [selectedEngineId, setSelectedEngineId] = useState<string>("");
-  
+  const [testCase, setTestCase] = useState<TestCase | null>(null);
+  const [executingCase, setExecutingCase] = useState(false);
+
   // 后置分析侧边栏状态
   const [analysisDrawerOpen, setAnalysisDrawerOpen] = useState(false);
   const [analysisRules, setAnalysisRules] = useState<AnalysisRule[]>([]);
   const [newRule, setNewRule] = useState("");
   const [currentMessage, setCurrentMessage] = useState<Message | null>(null);
   const lastUserInputRef = useRef<string>("");
+  const hasExecutedRef = useRef(false);
 
   const { messages, sending, sendMessage, abort, clear } = useChatStream({
     deviceId,
@@ -86,7 +111,54 @@ export default function Test() {
 
     fetchDevice();
     fetchEngines();
-  }, [deviceId, navigate]);
+
+    // 如果带有 caseId 参数，加载用例
+    if (caseId) {
+      fetchTestCase(caseId);
+    }
+  }, [deviceId, navigate, caseId]);
+
+  // 加载用例
+  const fetchTestCase = async (id: string) => {
+    try {
+      const res = await fetch(`/api/v1/cases/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTestCase(data);
+        // 设置用例关联的引擎
+        if (data.content?.engine_id) {
+          setSelectedEngineId(data.content.engine_id);
+        }
+      } else {
+        message.error("加载用例失败");
+      }
+    } catch (error) {
+      console.error("加载用例失败:", error);
+      message.error("加载用例失败");
+    }
+  };
+
+  // 执行用例步骤
+  const executeTestCase = async () => {
+    if (!testCase || hasExecutedRef.current) return;
+
+    hasExecutedRef.current = true;
+    setExecutingCase(true);
+
+    // 使用用例 name 作为执行指令
+    const instruction = testCase.name;
+
+    lastUserInputRef.current = testCase.name;
+    sendMessage(instruction);
+    setExecutingCase(false);
+  };
+
+  // 当用例加载完成后自动执行
+  useEffect(() => {
+    if (testCase && !executingCase && !hasExecutedRef.current) {
+      executeTestCase();
+    }
+  }, [testCase]);
 
   const handleSend = () => {
     if (!inputValue.trim()) return;
@@ -196,6 +268,13 @@ export default function Test() {
             <span className="font-medium">
               {device?.model || device?.device_id}
             </span>
+            {testCase && (
+              <>
+                <span className="text-gray-400">|</span>
+                <Tag color="blue">用例: {testCase.name}</Tag>
+                {executingCase && <Spin size="small" />}
+              </>
+            )}
           </div>
         </Space>
         <Space>
