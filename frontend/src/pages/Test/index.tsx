@@ -42,6 +42,7 @@ export default function Test() {
     engineId: selectedEngineId || undefined,
     onError: (error) => message.error(`错误: ${error}`),
   });
+  // console.log("messages:", messages);
 
   useEffect(() => {
     const fetchDevice = async () => {

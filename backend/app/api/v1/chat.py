@@ -150,9 +150,10 @@ async def chat_stream(request: ChatAPIRequest, db: Session = Depends(get_db)):
                 event_type = event.get("type")
                 event_data = event.get("data", {})
                 
-                print(f"[ChatAPI] Event: {event_type}")
+                # print(f"[ChatAPI] Event: {event_type}")
                 
                 if event_type == "thinking":
+                    # print(f"[ChatAPI] Thinking: {event_data.get('chunk', '')}")
                     yield f"data: {json.dumps({'type': 'thinking', 'content': event_data.get('chunk', '')})}\n\n"
                 
                 elif event_type == "action":

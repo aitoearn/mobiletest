@@ -140,21 +140,33 @@ class MobileAgent:
         print(f"[DEBUG] Current app: {current_app}")
         screen_info = self._build_screen_info(current_app)
         
-        screen_message = self._build_user_message("", screenshot, screen_info)
+        # 构建用户消息：包含任务提醒，让 LLM 知道当前执行状态
+        step_prompt = f"当前是第 {self._step_count} 步，请根据当前截图继续执行任务。"
+        if self._step_count > 1:
+            step_prompt += " 注意：请检查上一步操作是否生效，如果已完成部分任务，请继续下一步，不要重复已完成的操作。"
+        
+        screen_message = self._build_user_message(step_prompt, screenshot, screen_info)
         self._context.append(screen_message)
         
         messages = self._get_limited_context()
         
-        # 调试：打印消息结构
-        print(f"[DEBUG] Sending {len(messages)} messages to LLM")
+        # 调试：打印完整上下文
+        print(f"[DEBUG] ===== Step {self._step_count} Context ({len(messages)} messages) =====")
         for i, msg in enumerate(messages):
             content_preview = ""
             if isinstance(msg.get("content"), str):
-                content_preview = msg["content"][:50] + "..." if len(msg["content"]) > 50 else msg["content"]
+                content_preview = msg["content"][:100] + "..." if len(msg["content"]) > 100 else msg["content"]
             elif isinstance(msg.get("content"), list):
-                content_types = [c.get("type") for c in msg["content"]]
-                content_preview = f"list with types: {content_types}"
-            print(f"[DEBUG] Message {i}: role={msg.get('role')}, content={content_preview}")
+                content_parts = []
+                for c in msg.get("content", []):
+                    if c.get("type") == "text":
+                        text = c.get("text", "")[:80]
+                        content_parts.append(f"text: {text}...")
+                    elif c.get("type") == "image_url":
+                        content_parts.append("image")
+                content_preview = " | ".join(content_parts)
+            print(f"[DEBUG] Msg {i} [{msg.get('role')}]: {content_preview}")
+        print(f"[DEBUG] ===== End Context =====")
         
         thinking = ""
         raw_content = ""
@@ -235,7 +247,7 @@ class MobileAgent:
             "success": result.get("success", False),
             "finished": finished,
             "message": result.get("message", ""),
-            "screenshot": final_screenshot  # 添加截图
+            "screenshot": screenshot  # 添加截图
         }}
     
     async def _stream_llm(self, messages: list[dict]) -> AsyncIterator[dict[str, str]]:
@@ -308,8 +320,8 @@ class MobileAgent:
     def _parse_action(self, content: str) -> Optional[dict]:
         content = content.strip()
         
-        print(f"[DEBUG] Parsing action, content length: {len(content)}")
-        print(f"[DEBUG] Content: {content[:900]}...")
+        print(f"[DEBUG] _parse_action Parsing action, content length: {len(content)}")
+        print(f"[DEBUG] _parse_action Content: {content[:900]}...")
         
         # 优先检查 <answer> 标签
         if "<answer>" in content:

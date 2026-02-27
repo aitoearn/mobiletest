@@ -176,6 +176,7 @@ function CompletionActions({ message, onSave, onAnalyze }: {
 
 export function MessageList({ messages, onSaveInstruction, onAddAnalysis }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // console.log("MessageList Messages:", messages);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -192,6 +193,7 @@ export function MessageList({ messages, onSaveInstruction, onAddAnalysis }: Mess
         const config = roleConfig[msg.role];
         const isLastMessage = msg.id === messages[messages.length - 1]?.id;
         const showActions = isLastMessage && isMessageComplete(msg);
+        // console.log("MessageList Message:", msg);
 
         return (
           <div key={msg.id} className={`flex ${config.align}`}>
@@ -219,7 +221,7 @@ export function MessageList({ messages, onSaveInstruction, onAddAnalysis }: Mess
                   </div>
                 )}
 
-                {msg.content && (
+                {/* {msg.content && (
                   <div
                     className={`px-4 py-3 ${
                       msg.success === false
@@ -238,7 +240,7 @@ export function MessageList({ messages, onSaveInstruction, onAddAnalysis }: Mess
                       <p className="whitespace-pre-wrap">{msg.content}</p>
                     </div>
                   </div>
-                )}
+                )} */}
 
                 {isLastMessage && msg.isStreaming && !msg.content && (
                   <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-4 py-2 rounded-lg">

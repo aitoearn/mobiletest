@@ -97,12 +97,17 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
           if (line.startsWith("data: ")) {
             try {
               const data: SSEEvent = JSON.parse(line.slice(6));
+              // console.log("SSE Event:", data);
               
               if (data.type === "start") {
                 // Stream started
               } else if (data.type === "thinking") {
+                
                 // 收集思考内容
                 const thinkingContent = data.content || data.data?.content || "";
+                // console.log("Thinking:", thinkingContent);
+                // console.log("Current Thinking:", currentThinking);
+                // console.log("Full Content:", fullContent);
                 currentThinking += thinkingContent;
                 fullContent += thinkingContent;
                 setStreamingContent(fullContent);
@@ -115,6 +120,8 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
                 );
               } else if (data.type === "message") {
                 const msgContent = data.content || "";
+                // console.log("Message:", msgContent);
+                // console.log("Full Content:", fullContent);
                 fullContent += msgContent;
                 setStreamingContent(fullContent);
                 onMessage?.(msgContent);
@@ -128,6 +135,9 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
               } else if (data.type === "tool_call") {
                 const toolName = data.tool_name || data.data?.tool_name || "";
                 const toolArgs = data.tool_args || data.data?.tool_args || {};
+                console.log("tool_call toolName:", toolName);
+                console.log("tool_call toolArgs:", toolArgs)
+                console.log("tool_call data:", data)
                 
                 // 创建步骤，包含之前的思考内容
                 const step: ExecutionStep = {
@@ -138,31 +148,35 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
                   toolArgs,
                   timestamp: new Date(),
                 };
-                steps.push(step);
+                // steps.push(step);
                 
-                // 重置思考内容
-                currentThinking = "";
+                // // 重置思考内容
+                // currentThinking = "";
                 
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === agentMessageId
-                      ? { ...msg, steps: [...steps] }
-                      : msg
-                  )
-                );
-              } else if (data.type === "tool_result" || data.type === "step") {
-                // tool_result 或 step 类型都处理为步骤结果
-                const toolName = data.tool_name || (data.action as Record<string, string>)?.action || data.data?.tool_name || "";
-                const result = data.result || data.data?.result || "";
+                // setMessages((prev) =>
+                //   prev.map((msg) =>
+                //     msg.id === agentMessageId
+                //       ? { ...msg, steps: [...steps] }
+                //       : msg
+                //   )
+                // );
+              } else if (data.type === "step") {
+                // step 类型包含完整的步骤信息（思考、动作、结果、截图）
+                const toolName = (data.action as Record<string, string>)?.action || "";
+                const result = data.message || "";
                 const thinking = data.thinking || currentThinking || "";
+                const toolArgs = data.action || {};
+                console.log("step data:", data);
+
                 // 提取截图
-                const screenshot = data.screenshot || data.data?.screenshot || "";
+                const screenshot = data.screenshot || "";
                 
                 const step: ExecutionStep = {
                   id: `step-${Date.now()}-${Math.random()}`,
                   type: "tool_result",
                   content: thinking || `${toolName} 执行结果`,
                   toolName,
+                  toolArgs,
                   toolResult: result,
                   timestamp: new Date(),
                 };
@@ -186,6 +200,7 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
                 );
               } else if (data.type === "done") {
                 const finalContent = data.content || fullContent || "执行完成";
+                console.log("Final Content:", finalContent);
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === agentMessageId
@@ -202,6 +217,7 @@ export function useChatStream(options: UseChatStreamOptions = {}): UseChatStream
                 onComplete?.();
               } else if (data.type === "error") {
                 const errorMsg = data.data?.error || data.data?.message || "未知错误";
+                console.log("Error:", errorMsg);
                 setStreamingContent(`错误: ${errorMsg}`);
                 onError?.(errorMsg);
                 setMessages((prev) =>
