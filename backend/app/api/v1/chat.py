@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.services.device import DeviceControlService as DeviceService
 from app.services.vision import VisionService
 from app.agent.mobile_agent import MobileAgent
+from app.agent.config import ProtocolType, get_config_manager
+from app.agent.prompts import get_combined_prompt
 from app.models import Engine
 from app.core.database import get_db
 import logging
@@ -71,19 +73,32 @@ def _get_model_config(engine: Optional[Engine] = None):
     config = _load_config()
     provider_api_keys = config.get("providerApiKeys", {})
     
+    # 检测协议类型
+    config_manager = get_config_manager()
+    
     if engine:
         # 使用引擎配置，API Key 从系统设置中获取
         provider = engine.provider or ""
         api_key = provider_api_keys.get(provider, "") if provider else config.get("apiKey", "")
         
+        # 检测协议类型
+        detected_protocol = config_manager.detect_protocol(engine.model or "")
+        protocol_value = detected_protocol.value
+        
         print(f"[ChatAPI] Engine config: provider={provider}, model={engine.model}, base_url={engine.base_url}")
         print(f"[ChatAPI] API Key found: {bool(api_key)}")
+        print(f"[ChatAPI] Detected protocol: {protocol_value}")
+        
+        # 组合系统提示词：基础提示词 + 引擎补充提示词
+        combined_prompt = get_combined_prompt(protocol_value, engine.prompt)
         
         return {
             "base_url": engine.base_url or "https://open.bigmodel.cn/api/paas/v4",
             "api_key": api_key,
             "model": engine.model or "autoglm-phone",
-            "system_prompt": engine.prompt,  # 引擎的提示词作为系统提示词
+            "protocol": protocol_value,
+            "system_prompt": combined_prompt,  # 组合后的完整提示词
+            "user_prompt": engine.prompt,  # 保留原始用户提示词用于日志
         }
     
     # 使用默认配置
@@ -91,7 +106,9 @@ def _get_model_config(engine: Optional[Engine] = None):
         "base_url": config.get("baseUrl") or "https://open.bigmodel.cn/api/paas/v4",
         "api_key": config.get("apiKey") or "",
         "model": config.get("model") or "autoglm-phone",
-        "system_prompt": None,
+        "protocol": "universal",
+        "system_prompt": get_combined_prompt("universal", None),
+        "user_prompt": None,
     }
 
 

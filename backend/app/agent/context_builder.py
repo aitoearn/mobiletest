@@ -80,13 +80,27 @@ class ContextBuilder:
         else:
             prompt = self.DEFAULT_SYSTEM_PROMPT
         
-        # 替换变量
+        # 替换变量（使用安全的方式，避免替换提示词中的示例占位符如 {think}）
         action_space_prompt = ActionSpace.get_action_prompt()
-        prompt = prompt.format(
-            scale=self.config.coordinate_scale,
-            action_space=action_space_prompt,
-            **self.config.extra_context
-        )
+        
+        # 只替换特定的占位符，保留其他 {xxx} 不变
+        safe_placeholders = {
+            'scale': self.config.coordinate_scale,
+            'action_space': action_space_prompt,
+        }
+        
+        # 先转义提示词中的 { 和 }，然后只替换我们想要的占位符
+        import re
+        
+        def replace_placeholder(match):
+            key = match.group(1)
+            if key in safe_placeholders:
+                return str(safe_placeholders[key])
+            # 保留未知的占位符
+            return match.group(0)
+        
+        # 替换 {key} 格式的占位符
+        prompt = re.sub(r'\{(\w+)\}', replace_placeholder, prompt)
         
         # 使用协议适配器适配提示词
         return self.adapter.adapt_system_prompt(prompt)

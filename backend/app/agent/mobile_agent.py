@@ -60,10 +60,21 @@ class MobileAgentV2:
         max_steps: int = 20,
         max_context_messages: int = 10,
     ):
+        # 从 model_config 中提取系统提示词和协议
+        system_prompt = model_config.get("system_prompt")
+        protocol_str = model_config.get("protocol", "universal")
+        
+        try:
+            protocol = ProtocolType(protocol_str)
+        except ValueError:
+            protocol = ProtocolType.UNIVERSAL
+        
         self.config = AgentConfig(
             model_config=model_config,
+            protocol=protocol,
             max_steps=max_steps,
             max_context_messages=max_context_messages,
+            system_prompt=system_prompt,
         )
         self.device = device_service
         self.vision = vision_service
@@ -90,14 +101,18 @@ class MobileAgentV2:
         """初始化协议适配器"""
         model_id = self.config.model_config.get("model", "")
         
-        # 自动检测协议
-        config_manager = get_config_manager()
-        detected_protocol = config_manager.detect_protocol(model_id)
-        self.config.protocol = detected_protocol
+        # 如果配置中已指定协议，优先使用；否则自动检测
+        if self.config.protocol == ProtocolType.UNIVERSAL:
+            config_manager = get_config_manager()
+            detected_protocol = config_manager.detect_protocol(model_id)
+            self.config.protocol = detected_protocol
+            logger.info(f"Protocol auto-detected: {detected_protocol.value}")
+        else:
+            logger.info(f"Protocol from config: {self.config.protocol.value}")
         
         # 获取适配器
-        self.adapter = get_adapter(detected_protocol)
-        logger.info(f"Protocol adapter initialized: {detected_protocol.value}")
+        self.adapter = get_adapter(self.config.protocol)
+        logger.info(f"Protocol adapter initialized: {self.config.protocol.value}")
     
     def _init_llm_client(self):
         """初始化 LLM 客户端"""
@@ -127,7 +142,7 @@ class MobileAgentV2:
         # 上下文构建器
         context_config = ContextConfig(
             max_history_entries=self.config.max_context_messages,
-            system_prompt_template=self.config.system_prompt,
+                system_prompt_template=self.config.system_prompt,
             coordinate_scale=self.adapter.config.coordinate_scale if hasattr(self, 'adapter') else 1000,
         )
         self.context_builder = ContextBuilder(
@@ -135,8 +150,9 @@ class MobileAgentV2:
             protocol=self.config.protocol
         )
         
+        print(f"_init_components Context builder initialized: {context_config}")
         # 动作解析器
-        self.action_parser = create_parser("auto")
+        self.action_parser = create_parser("autoglm")
         
         # 任务规划器
         if self.config.enable_planning:
@@ -297,7 +313,7 @@ class MobileAgentV2:
         action = self._parse_action(raw_content)
         
         if not action:
-            logger.warning(f"Failed to parse action from: {raw_content}")
+            logger.warning(f"Failed to parse action1 from: {raw_content}")
             yield {"type": "step", "data": {
                 "step": self._step_count,
                 "thinking": thinking,
@@ -406,13 +422,14 @@ class MobileAgentV2:
                 elif chunk["type"] == "raw":
                     raw_content += chunk["content"]
             
-            logger.info(f"Raw LLM content: {raw_content[:500]}")
+            print(f"Raw LLM content: {raw_content[:500]}")
+          
             
             # 使用动作解析器解析动作
             action_obj = self.action_parser.parse(raw_content)
             
             if not action_obj:
-                logger.warning(f"Failed to parse action from: {raw_content}")
+                logger.warning(f"Failed to parse action2 from: {raw_content}")
                 yield {"type": "step", "data": {
                     "step": self._step_count,
                     "thinking": thinking,

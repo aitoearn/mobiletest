@@ -165,20 +165,38 @@ class AutoGLMActionParser(ActionParser):
     
     def can_parse(self, raw_output: str) -> bool:
         """检查是否为 AutoGLM 格式"""
-        pattern = r'^\s*\w+\([^)]*\)\s*$'
-        return bool(re.match(pattern, raw_output.strip()))
+        # 清理文本：移除中文标点和其他干扰字符
+        cleaned = self._clean_text(raw_output.strip())
+        # 尝试匹配整行或行内的 action 调用
+        pattern = r'\b\w+\([^)]*\)'
+        return bool(re.search(pattern, cleaned))
+    
+    def _clean_text(self, text: str) -> str:
+        """清理文本，移除干扰字符"""
+        # 移除中文标点符号
+        text = re.sub(r'[，。！？、；：""''（）【】]', '', text)
+        # 移除多余空白
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
     
     def parse(self, raw_output: str) -> Optional[Action]:
         """解析 AutoGLM 格式"""
         try:
-            pattern = r'(\w+)\(([^)]*)\)'
-            match = re.match(pattern, raw_output.strip())
+            # 清理文本
+            print(f"Raw action: {repr(raw_output)}")
+            cleaned = self._clean_text(raw_output.strip())
+            print(f"Cleaned: {repr(cleaned)}")
             
+            # 在多行文本中搜索 action 调用
+            pattern = r'(\w+)\(([^)]*)\)'
+            match = re.search(pattern, cleaned)
+            print(f"Match result: {match}")
             if not match:
                 return None
             
             wrapper_type = match.group(1)
             params_str = match.group(2)
+            print(f"Action params: {params_str}")
             
             # 解析参数
             params = {}
@@ -203,6 +221,7 @@ class AutoGLMActionParser(ActionParser):
                 
                 # 移除已解析的数组部分
                 params_str_no_arrays = re.sub(array_pattern, '', params_str)
+                print(f"Remaining params: {params_str_no_arrays}")
                 
                 # 匹配 key=value 或 key="value"
                 param_pattern = r'(\w+)=(?:"([^"]*)"|([^,\s]*))'
@@ -220,6 +239,7 @@ class AutoGLMActionParser(ActionParser):
                         pass
                     
                     params[key] = value
+                    print(f"Parsed param: {key} = {value}")
                 
                 # 如果没有解析出任何参数，将整个内容作为默认参数
                 # 例如: Launch("京东") -> params = {"app": "京东"}
@@ -255,6 +275,8 @@ class AutoGLMActionParser(ActionParser):
                 action_type_str = params.pop('action')  # 移除并获取 action 参数
             else:
                 action_type_str = wrapper_type
+            
+            print(f"Action type: {action_type_str}")
             
             # 标准化动作类型
             json_parser = JSONActionParser()
@@ -374,11 +396,33 @@ class CompositeActionParser(ActionParser):
     
     def parse(self, raw_output: str) -> Optional[Action]:
         """尝试所有解析器直到成功"""
+        # 首先尝试直接解析
         for parser in self.parsers:
             if parser.can_parse(raw_output):
                 action = parser.parse(raw_output)
                 if action:
                     return action
+        
+        # 尝试从 <answer> 标签中提取
+        answer_match = re.search(r'<answer>(.*?)</answer>', raw_output, re.DOTALL)
+        if answer_match:
+            answer_content = answer_match.group(1).strip()
+            for parser in self.parsers:
+                if parser.can_parse(answer_content):
+                    action = parser.parse(answer_content)
+                    if action:
+                        return action
+        
+        # 尝试从代码块中提取
+        code_block_pattern = r'```(?:\w+)?\n(.*?)\n```'
+        code_match = re.search(code_block_pattern, raw_output, re.DOTALL)
+        if code_match:
+            code_content = code_match.group(1).strip()
+            for parser in self.parsers:
+                if parser.can_parse(code_content):
+                    action = parser.parse(code_content)
+                    if action:
+                        return action
         
         return None
     
@@ -401,6 +445,8 @@ def create_parser(format_type: str = "auto") -> ActionParser:
         ActionParser 实例
     """
     format_type = format_type.lower()
+
+    print(f"Creating parser for format: {format_type}")
     
     if format_type == "json":
         return JSONActionParser()
