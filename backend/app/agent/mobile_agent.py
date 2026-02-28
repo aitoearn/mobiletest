@@ -3,99 +3,202 @@ import base64
 import json
 import re
 import traceback
-from typing import Any, AsyncIterator, Optional
-from dataclasses import dataclass
+from typing import Any, AsyncIterator, Optional, Dict, List
+from dataclasses import dataclass, field
 import logging
+
+from openai import AsyncOpenAI
+import httpx
+
+# 导入新架构模块
+from .config import ProtocolType, ModelConfig, ModelProvider, get_config_manager
+from .protocol_adapter import get_adapter, parse_action as adapt_parse_action
+from .actions import Action, ActionType, ActionSpace, create_parser
+from .history import HistoryManager, HistoryEntry
+from .context_builder import ContextBuilder, ContextConfig
+from .planner import create_planner, TaskPlan, PlanExecutor
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class StepResult:
+    """步骤执行结果"""
     success: bool
     finished: bool
     action: Optional[dict]
     thinking: str
     message: str
+    step: int = 0
+    screenshot: Optional[str] = None
 
 
-class MobileAgent:
+@dataclass
+class AgentConfig:
+    """Agent 配置"""
+    model_config: Dict[str, Any] = field(default_factory=dict)
+    protocol: ProtocolType = ProtocolType.UNIVERSAL
+    max_steps: int = 20
+    max_context_messages: int = 10
+    enable_history: bool = True
+    enable_planning: bool = True
+    enable_loop_detection: bool = True
+    system_prompt: Optional[str] = None
+
+
+class MobileAgentV2:
+    """
+    MobileAgent V2 - 重构版本
+    集成新架构：协议适配、历史管理、上下文构建、任务规划
+    """
+    
     def __init__(
         self,
         model_config: dict,
         device_service,
         vision_service,
         max_steps: int = 20,
-        max_context_messages: int = 10,  # 增加上下文消息数量，防止任务描述丢失
+        max_context_messages: int = 10,
     ):
-        self.model_config = model_config
+        self.config = AgentConfig(
+            model_config=model_config,
+            max_steps=max_steps,
+            max_context_messages=max_context_messages,
+        )
         self.device = device_service
         self.vision = vision_service
-        self.max_steps = max_steps
-        self.max_context_messages = max_context_messages
         
-        logger.info(f"MobileAgent init with config: base_url={model_config.get('base_url')}, model={model_config.get('model')}, api_key={model_config.get('api_key', '')[:10]}...")
+        # 初始化协议适配
+        self._init_protocol_adapter()
         
-        # 打印完整配置用于调试
-        print(f"[MobileAgent] Full config: {model_config}")
+        # 初始化 LLM 客户端
+        self._init_llm_client()
         
-        from openai import AsyncOpenAI
-        import httpx
-        base_url = model_config.get("base_url", "https://open.bigmodel.cn/api/paas/v4")
-        print(f"[MobileAgent] Using base_url: {base_url}")
+        # 初始化新架构组件
+        self._init_components()
+        
+        # 状态管理
+        self._step_count = 0
+        self._is_running = False
+        self._cancel_event = asyncio.Event()
+        self._context: List[Dict] = []
+        self._current_task: Optional[str] = None
+        
+        logger.info(f"MobileAgentV2 initialized with protocol: {self.config.protocol.value}")
+    
+    def _init_protocol_adapter(self):
+        """初始化协议适配器"""
+        model_id = self.config.model_config.get("model", "")
+        
+        # 自动检测协议
+        config_manager = get_config_manager()
+        detected_protocol = config_manager.detect_protocol(model_id)
+        self.config.protocol = detected_protocol
+        
+        # 获取适配器
+        self.adapter = get_adapter(detected_protocol)
+        logger.info(f"Protocol adapter initialized: {detected_protocol.value}")
+    
+    def _init_llm_client(self):
+        """初始化 LLM 客户端"""
+        base_url = self.config.model_config.get("base_url", "https://open.bigmodel.cn/api/paas/v4")
+        api_key = self.config.model_config.get("api_key")
         
         self.client = AsyncOpenAI(
             base_url=base_url,
-            api_key=model_config.get("api_key"),
+            api_key=api_key,
             timeout=120,
             http_client=httpx.AsyncClient(proxy=None),
         )
         
-        self._step_count = 0
-        self._is_running = False
-        self._cancel_event = asyncio.Event()
-        self._context: list[dict] = []
+        logger.info(f"LLM client initialized: base_url={base_url}")
+    
+    def _init_components(self):
+        """初始化新架构组件"""
+        # 历史管理器
+        if self.config.enable_history:
+            self.history_manager = HistoryManager(
+                max_history=50,
+                enable_loop_detection=self.config.enable_loop_detection,
+            )
+        else:
+            self.history_manager = None
         
-        # 优先使用传入的系统提示词（来自引擎配置），否则使用默认提示词
-        from .prompts import SYSTEM_PROMPT
-        custom_prompt = model_config.get("system_prompt")
-        logger.info(f"MobileAgent using system prompt: {custom_prompt}")
-        self.system_prompt = custom_prompt if custom_prompt else SYSTEM_PROMPT
-        logger.info(f"MobileAgent using {'custom' if custom_prompt else 'default'} system prompt")
+        # 上下文构建器
+        context_config = ContextConfig(
+            max_history_entries=self.config.max_context_messages,
+            system_prompt_template=self.config.system_prompt,
+            coordinate_scale=self.adapter.config.coordinate_scale if hasattr(self, 'adapter') else 1000,
+        )
+        self.context_builder = ContextBuilder(
+            config=context_config,
+            protocol=self.config.protocol
+        )
+        
+        # 动作解析器
+        self.action_parser = create_parser("auto")
+        
+        # 任务规划器
+        if self.config.enable_planning:
+            self.plan_executor = PlanExecutor()
+        else:
+            self.plan_executor = None
     
     async def stream(self, task: str, device_id: str) -> AsyncIterator[dict[str, Any]]:
+        """
+        执行任务流
+        
+        使用新架构组件：
+        - 历史管理器记录操作历史
+        - 上下文构建器构建 LLM 消息
+        - 动作解析器解析模型输出
+        - 任务规划器管理复杂任务
+        """
         self._is_running = True
         self._cancel_event.clear()
         self._step_count = 0
-        self._context = [{"role": "system", "content": self.system_prompt}]
+        self._current_task = task
+        
+        # 重置历史记录
+        if self.history_manager:
+            self.history_manager.clear()
+        
+        # 创建任务计划（如果启用）
+        if self.plan_executor and self.config.enable_planning:
+            plan = self.plan_executor.create_plan(task)
+            logger.info(f"Task plan created: {len(plan.steps)} steps")
+            yield {"type": "plan", "data": plan.to_dict()}
         
         try:
+            # 初始截图
             screenshot = await self.device.screenshot_base64(device_id)
             if not screenshot:
                 yield {"type": "error", "data": {"message": "截图失败"}}
                 return
             
-            # 获取当前应用信息
-            current_app = await self.device.get_current_app(device_id)
-            screen_info = self._build_screen_info(current_app)
-            
-            initial_message = self._build_user_message(
-                task, 
-                screenshot, 
-                screen_info
-            )
-            self._context.append(initial_message)
-            
-            while self._step_count < self.max_steps and self._is_running:
+            # 主循环
+            while self._step_count < self.config.max_steps and self._is_running:
                 if self._cancel_event.is_set():
                     raise asyncio.CancelledError()
                 
-                async for event in self._execute_step(device_id):
+                # 检查循环检测
+                if self.history_manager:
+                    is_loop, loop_reason = self.history_manager.check_loop()
+                    if is_loop:
+                        logger.warning(f"Loop detected: {loop_reason}")
+                        yield {"type": "warning", "data": {"message": f"检测到循环: {loop_reason}"}}
+                        # 可以在这里添加循环处理逻辑
+                
+                async for event in self._execute_step_v2(device_id, task, screenshot):
                     yield event
                     
                     if event["type"] == "step" and event["data"].get("finished"):
                         return
+                
+                # 更新截图用于下一步
+                screenshot = await self.device.screenshot_base64(device_id)
             
+            # 达到最大步数
             yield {
                 "type": "done",
                 "data": {
@@ -250,11 +353,168 @@ class MobileAgent:
             "screenshot": screenshot  # 添加截图
         }}
     
+    async def _execute_step_v2(
+        self,
+        device_id: str,
+        task: str,
+        screenshot: str
+    ) -> AsyncIterator[dict[str, Any]]:
+        """
+        执行单步 - V2 版本（使用新架构组件）
+        """
+        self._step_count += 1
+        
+        # 截图前短暂等待
+        await asyncio.sleep(0.5)
+        
+        try:
+            # 获取当前应用信息
+            current_app = await self.device.get_current_app(device_id)
+            screen_info = self._build_screen_info(current_app)
+            
+            # 使用上下文构建器构建消息
+            step_prompt = f"当前是第 {self._step_count} 步，请根据当前截图继续执行任务。"
+            if self._step_count > 1:
+                step_prompt += " 注意：请检查上一步操作是否生效，不要重复已完成的操作。"
+            
+            messages = self.context_builder.build_messages(
+                task=task,
+                history_manager=self.history_manager,
+                current_screenshot=screenshot,
+                current_observation=screen_info,
+            )
+            
+            # 添加步骤提示
+            messages.append({
+                "role": "user",
+                "content": step_prompt
+            })
+            
+            logger.debug(f"Step {self._step_count}: Sending {len(messages)} messages to LLM")
+            
+            # 调用 LLM
+            thinking = ""
+            raw_content = ""
+            
+            async for chunk in self._stream_llm(messages):
+                if self._cancel_event.is_set():
+                    raise asyncio.CancelledError()
+                
+                if chunk["type"] == "thinking":
+                    thinking += chunk["content"]
+                    yield {"type": "thinking", "data": {"chunk": chunk["content"]}}
+                elif chunk["type"] == "raw":
+                    raw_content += chunk["content"]
+            
+            logger.info(f"Raw LLM content: {raw_content[:500]}")
+            
+            # 使用动作解析器解析动作
+            action_obj = self.action_parser.parse(raw_content)
+            
+            if not action_obj:
+                logger.warning(f"Failed to parse action from: {raw_content}")
+                yield {"type": "step", "data": {
+                    "step": self._step_count,
+                    "thinking": thinking,
+                    "action": None,
+                    "success": False,
+                    "finished": True,
+                    "message": "无法解析动作"
+                }}
+                return
+            
+            # 转换为旧格式以保持兼容性
+            action_dict = self._action_to_dict(action_obj)
+            
+            yield {"type": "action", "data": {
+                "step": self._step_count,
+                "action": action_dict
+            }}
+            
+            # 执行动作
+            result = await self._execute_action(device_id, action_dict)
+            
+            # 记录到历史
+            if self.history_manager:
+                self.history_manager.add_entry(
+                    action=action_obj,
+                    observation=result.get("message", ""),
+                    metadata={"success": result.get("success", False)}
+                )
+            
+            # 检查是否完成
+            finished = action_obj.action_type == ActionType.FINISH or result.get("should_finish", False)
+            
+            # 更新计划执行器
+            if self.plan_executor:
+                self.plan_executor.report_step_result(
+                    success=result.get("success", False),
+                    observation=result.get("message", "")
+                )
+            
+            yield {"type": "step", "data": {
+                "step": self._step_count,
+                "thinking": thinking,
+                "action": action_dict,
+                "success": result.get("success", False),
+                "finished": finished,
+                "message": result.get("message", ""),
+                "screenshot": screenshot
+            }}
+            
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Step execution error: {e}", exc_info=True)
+            yield {"type": "error", "data": {"message": f"步骤执行错误: {e}"}}
+            yield {"type": "step", "data": {
+                "step": self._step_count,
+                "success": False,
+                "finished": True,
+                "message": str(e)
+            }}
+    
+    def _action_to_dict(self, action: Action) -> dict:
+        """将 Action 对象转换为字典（保持向后兼容）"""
+        action_type_map = {
+            ActionType.CLICK: "Tap",
+            ActionType.LONG_CLICK: "LongPress",
+            ActionType.SWIPE: "Swipe",
+            ActionType.TYPE: "Type",
+            ActionType.BACK: "Back",
+            ActionType.HOME: "Home",
+            ActionType.RECENT: "Recent",
+            ActionType.WAIT: "Wait",
+            ActionType.FINISH: "Finish",
+            ActionType.LAUNCH_APP: "Launch",
+        }
+        
+        action_name = action_type_map.get(action.action_type, action.action_type.value)
+        
+        result = {
+            "_metadata": "do",
+            "action": action_name,
+        }
+        
+        # 添加参数
+        for key, value in action.params.items():
+            result[key] = value
+        
+        # 特殊处理某些动作的参数映射
+        if action.action_type == ActionType.CLICK and "x" in action.params and "y" in action.params:
+            result["element"] = [action.params["x"], action.params["y"]]
+        
+        if action.action_type == ActionType.FINISH:
+            result["_metadata"] = "finish"
+            result["message"] = action.params.get("message", "任务完成")
+        
+        return result
+    
     async def _stream_llm(self, messages: list[dict]) -> AsyncIterator[dict[str, str]]:
-        logger.info(f"Calling LLM with model: {self.model_config.get('model')}, base_url: {self.model_config.get('base_url')}")
+        logger.info(f"Calling LLM with model: {self.config.model_config.get('model')}, base_url: {self.config.model_config.get('base_url')}")
         try:
             stream = await self.client.chat.completions.create(
-                model=self.model_config.get("model", "autoglm-phone"),
+                model=self.config.model_config.get("model", "autoglm-phone"),
                 messages=messages,
                 max_tokens=2000,
                 temperature=0.7,
@@ -702,7 +962,7 @@ class MobileAgent:
         # 先清理所有历史消息中的图片（只保留最后一条用户消息的图片）
         cleaned_context = self._remove_old_images_from_context()
         
-        if len(cleaned_context) <= self.max_context_messages + 1:
+        if len(cleaned_context) <= self.config.max_context_messages + 1:
             return cleaned_context
         
         system_message = cleaned_context[0]
@@ -711,7 +971,7 @@ class MobileAgent:
         
         # 计算需要保留的最近消息数量
         # 如果有初始任务消息，则需要为它留出空间
-        slots_for_recent = self.max_context_messages - 1 if initial_task_message else self.max_context_messages
+        slots_for_recent = self.config.max_context_messages - 1 if initial_task_message else self.config.max_context_messages
         recent_messages = cleaned_context[-(slots_for_recent):]
         
         # 构建最终上下文：system + 初始任务 + 最近消息
@@ -804,3 +1064,69 @@ class MobileAgent:
     @property
     def is_running(self) -> bool:
         return self._is_running
+    
+    # ========== 新架构扩展方法 ==========
+    
+    def get_history_summary(self) -> str:
+        """获取历史记录摘要"""
+        if self.history_manager:
+            return self.history_manager.get_summary()
+        return "历史记录未启用"
+    
+    def get_plan_progress(self) -> Dict[str, Any]:
+        """获取任务计划进度"""
+        if self.plan_executor:
+            return self.plan_executor.get_progress()
+        return {"total": 0, "completed": 0, "failed": 0, "pending": 0, "percentage": 0}
+    
+    def export_session(self) -> Dict[str, Any]:
+        """导出会话数据"""
+        return {
+            "task": self._current_task,
+            "steps": self._step_count,
+            "history": self.history_manager.export_to_dict() if self.history_manager else None,
+            "plan": self.plan_executor.current_plan.to_dict() if self.plan_executor and self.plan_executor.current_plan else None,
+        }
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """获取执行统计信息"""
+        stats = {
+            "steps": self._step_count,
+            "protocol": self.config.protocol.value,
+        }
+        
+        if self.history_manager:
+            stats["history"] = self.history_manager.get_statistics()
+        
+        if self.plan_executor:
+            stats["plan"] = self.get_plan_progress()
+        
+        return stats
+
+
+# ========== 向后兼容别名 ==========
+
+class MobileAgent(MobileAgentV2):
+    """
+    MobileAgent - 向后兼容的别名
+    
+    此类继承自 MobileAgentV2，提供完全相同的 API。
+    新代码建议直接使用 MobileAgentV2。
+    """
+    pass
+
+
+# 便捷函数
+def create_agent(
+    model_config: dict,
+    device_service,
+    vision_service,
+    **kwargs
+) -> MobileAgentV2:
+    """创建 Agent 的便捷函数"""
+    return MobileAgentV2(
+        model_config=model_config,
+        device_service=device_service,
+        vision_service=vision_service,
+        **kwargs
+    )
